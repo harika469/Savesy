@@ -1,6 +1,6 @@
 # Savesy
 
-Savesy is a local-first mobile app for saving the good things you find online—and actually finding them again. V1 includes seeded demo saves, search and filters, collections, local persistence, favorites, deletion, sharing, original-link opening, and a rotating Rediscover pick.
+Savesy is a local-first Expo SDK 54 mobile app for saving the good things you find online—and actually finding them again. V1 includes seeded demo saves, search and filters, collections, local persistence, favorites, deletion, sharing, original-link opening, and a rotating Rediscover pick.
 
 ## Run it
 
