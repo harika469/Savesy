@@ -9,6 +9,7 @@ import { Screen } from '@/components/Screen';
 import { PaperCard, ScreenHeader } from '@/components/ui';
 import { colors, radii } from '@/constants/theme';
 import { CloudStatus, useSaves } from '@/context/SavesContext';
+import { smartSavesAvailable } from '@/lib/ai';
 import { serializeBackup } from '@/utils/backup';
 
 // Alert buttons don't exist on web; fall back to the browser's confirm there.
@@ -60,6 +61,11 @@ export default function SettingsScreen() {
       <Stat value={collections.length} label="collections" color={colors.mint} />
       <Stat value={favorites} label="favorites" color={colors.sky} />
     </View>
+    {smartSavesAvailable ? <Pressable accessibilityRole="button" onPress={() => router.push('/pro')} style={({ pressed }) => [styles.pro, pressed && { opacity: .8 }]}>
+      <Ionicons name="sparkles" size={22} color={colors.white} />
+      <View style={{ flex: 1 }}><Text style={styles.proTitle}>Savesy Pro</Text><Text style={styles.proBody}>Unlimited Smart Saves: recipes, places and products pulled out for you.</Text></View>
+      <Ionicons name="chevron-forward" size={18} color={colors.white} />
+    </Pressable> : null}
     <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Account</Text>
     {account.configured ? <AccountCard email={account.email} signedIn={account.signedIn} loaded={account.loaded} onSignIn={() => router.push('/sign-in')} onSignOut={signOut} /> : null}
     {account.signedIn || !account.configured ? <View style={account.configured ? { marginTop: 12 } : undefined}><CloudCard status={cloud} onSync={() => { void syncNow(); }} /></View> : null}
@@ -154,5 +160,8 @@ const styles = StyleSheet.create({
   cloudBody: { fontSize: 12, color: colors.ink, marginTop: 2, lineHeight: 17, opacity: .75 },
   syncButton: { alignSelf: 'flex-start', flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: colors.white, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
   syncText: { fontSize: 11, fontWeight: '900', letterSpacing: 1, color: colors.purpleDark },
+  pro: { marginTop: 22, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.purple, borderRadius: radii.lg, padding: 16 },
+  proTitle: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  proBody: { color: colors.white, opacity: .9, fontSize: 12, marginTop: 2, lineHeight: 17 },
   footer: { textAlign: 'center', color: colors.gray, fontSize: 12, marginTop: 30, fontStyle: 'italic' },
 });

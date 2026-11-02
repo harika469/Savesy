@@ -10,6 +10,8 @@ Savesy is a local-first Expo SDK 54 mobile app for saving the good things you fi
 - **Share to Savesy** — tap Share in any app (browser, YouTube, Instagram, Maps…) and pick **Savesy** (Android) or **Save to Savesy** (iOS). The Save screen opens with the link, the page title and any extra shared text as the note. Needs a development or installed build, not Expo Go (see below).
 - **Deep link** — `savesy://add?url=https://…` opens the Save screen with the link filled in (handy for iOS Shortcuts / Android share automations).
 - **Accounts (Clerk) + cloud sync (Supabase)** — sign in with just your email and a one-time code (no passwords). Signed in, every change syncs to Supabase a moment later and when the app comes back to the foreground, so your saves follow you to any phone. Guest saves move into your account when you first sign in. The phone always keeps a full copy, so Savesy works offline. Without configuration it stays local-only.
+- **Smart Saves (AI)** — one tap reads the link on the server (including TikTok, YouTube and X captions via oEmbed, and recipe/product JSON-LD) and Claude fills in a real title, tags, a short summary, and recipe ingredients, a place with an **Open in Maps** button, or a product and price. Free accounts get 10 a month; Pro is unlimited.
+- **Savesy Pro screen** — shows this month's usage and the Pro plans. Payments aren't wired up yet: **I want Pro** records interest (a fake-door test) so you can measure demand before building billing. It says plainly that nothing is charged.
 - **Your stash** (tap the smiley on Home) — counts, plus backup: share or copy your whole library as a backup, restore it from the clipboard (merges, never overwrites), bring back the demo, or erase everything.
 - Seeded demo content, on-device persistence, favorites, sharing and opening the original link.
 
@@ -57,6 +59,23 @@ How it behaves (`components/Account.tsx`, `lib/cloudSync.ts`, `utils/sync.ts`):
 - Sign out syncs first, warns if anything couldn't be uploaded, then clears the phone. Your saves stay in your account.
 - Clerk only (no Supabase settings): you can sign in, but saves stay on the phone.
 
+## Smart Saves and Pro
+
+Needs the Clerk + Supabase setup above.
+
+1. Run `supabase/migrations/20261104000000_smart_saves.sql` (adds `saves.details`, `entitlements`, `ai_usage`, `pro_interest` and the `get_plan` / `consume_ai_credit` / `refund_ai_credit` functions). Allowances are enforced in the database: 10 Smart Saves a month on Free, 500 on Pro (fair use). Change them in `savesy_limits()`.
+2. Deploy the function and give it a Claude API key:
+   ```bash
+   supabase functions deploy enrich-save --no-verify-jwt
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   `--no-verify-jwt` is required because requests carry Clerk tokens; the function authenticates them through the database (`consume_ai_credit` runs as the caller, so Supabase validates the token and RLS applies).
+3. Model: defaults to `claude-opus-5-5` at low effort, with server-side refusal fallback. Each Smart Save is one short request (a few thousand input tokens). To trade quality for cost, set `supabase secrets set ANTHROPIC_MODEL=claude-haiku-5-5` and compare results on your own links first.
+4. Make someone Pro by hand (until payments exist): `insert into entitlements (user_id, source) values ('user_…', 'manual');` with their Clerk user id. Set `expires_at` for trials.
+5. Read demand: `select plan, count(*) from pro_interest group by plan;`
+
+Code: `supabase/functions/enrich-save/` (server), `supabase/functions/_shared/enrich.ts` (prompt, JSON schema, page parsing, URL safety, result validation, shared with the app and tested by Jest), `lib/ai.ts`, `components/SmartSave.tsx`, `app/pro.tsx`. The function blocks private/internal addresses and caps page size and time.
+
 ## Share-to-Savesy builds
 
 Receiving shares needs native code ([`expo-share-intent`](https://github.com/achorein/expo-share-intent)), so it doesn't work in Expo Go. Everything else still runs in Expo Go; there the share feature just stays off.
@@ -100,5 +119,6 @@ Data is stored on-device with AsyncStorage under `@savesy/v1`. Clearing Expo Go'
 - `utils/` — link metadata and URL helpers, search, share parsing, backup/restore, and dates
 - `lib/` — Supabase client (sends the Clerk token) and cloud sync
 - `components/Account.tsx`, `app/sign-in.tsx` — Clerk provider and the email-code sign-in screen
-- `supabase/migrations/` — database schema and row-level security
+- `supabase/migrations/` — database schema, row-level security, plan allowances
+- `supabase/functions/` — the Smart Saves edge function and its shared logic
 - `__tests__/` — Jest unit tests (`jest-expo` preset)

@@ -1,4 +1,5 @@
 import { Collection, SavedItem, SaveType } from '@/types';
+import { normalizeDetails } from '@/supabase/functions/_shared/enrich';
 import { sameUrl } from './saves';
 
 export type Store = { saves: SavedItem[]; collections: Collection[] };
@@ -26,6 +27,7 @@ function cleanSave(raw: unknown): SavedItem | undefined {
     isFavorite: v.isFavorite === true,
     createdAt: isString(v.createdAt) && !Number.isNaN(Date.parse(v.createdAt)) ? v.createdAt : new Date().toISOString(),
     lastRediscoveredAt: isString(v.lastRediscoveredAt) ? v.lastRediscoveredAt : undefined,
+    ...(normalizeDetails(v.details) ? { details: normalizeDetails(v.details) } : {}),
   };
 }
 

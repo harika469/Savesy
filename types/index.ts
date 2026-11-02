@@ -1,3 +1,6 @@
+import type { SmartDetails } from '@/supabase/functions/_shared/enrich';
+export type { SmartDetails };
+
 export type SaveType = 'article' | 'video' | 'product' | 'place' | 'social' | 'other';
 
 export interface SavedItem {
@@ -8,6 +11,8 @@ export interface SavedItem {
   type: SaveType;
   source?: string;
   imageUrl?: string;
+  /** Recipe / place / product details from Smart Saves. */
+  details?: SmartDetails;
   tags: string[];
   collectionId?: string;
   isFavorite: boolean;

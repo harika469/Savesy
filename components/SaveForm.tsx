@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SmartButton, SmartDetailsCard, useSmartSave } from '@/components/SmartSave';
 import { Field, FilterChip, Input, PaperCard, PrimaryButton } from '@/components/ui';
 import { colors, radii } from '@/constants/theme';
 import { useSaves } from '@/context/SavesContext';
@@ -30,6 +31,8 @@ export function SaveForm({ initial, submitLabel, editingId, onSubmit }: Props) {
   const [imageUrl, setImageUrl] = useState(initial?.imageUrl);
   const [collectionId, setCollectionId] = useState(initial?.collectionId);
   const [loading, setLoading] = useState(false);
+  const [details, setDetails] = useState(initial?.details);
+  const smart = useSmartSave();
   // Remember which fields the person typed themselves so fetched metadata never overwrites them.
   const touched = useRef({ title: !!initial?.title, type: !!editingId, source: !!editingId });
   // When editing, the existing details are already the person's choice; only re-fetch if the link changes.
@@ -60,11 +63,24 @@ export function SaveForm({ initial, submitLabel, editingId, onSubmit }: Props) {
     else Alert.alert('Nothing to paste', 'Copy a link first, then tap paste.');
   };
 
+  const smartFill = async () => {
+    const normalized = normalizeUrl(url);
+    if (!normalized) { Alert.alert('Add a link first', 'Paste the link you want Savesy to read.'); return; }
+    const result = await smart.run({ url: normalized, title: title.trim() || undefined, note: note.trim() || undefined });
+    if (!result) return;
+    touched.current = { title: true, type: true, source: touched.current.source };
+    setTitle(result.title);
+    setType(result.type);
+    setTags(current => [...new Set([...parseTags(current), ...result.tags])].join(', '));
+    if (!note.trim() && result.summary) setNote(result.summary);
+    setDetails(result.details);
+  };
+
   const submit = () => {
     const normalized = normalizeUrl(url);
     if (!normalized) { Alert.alert('That link looks off', 'Paste a full web link, like https://example.com.'); return; }
     if (!title.trim()) { Alert.alert('Almost there', 'Give it a title so you can find it later.'); return; }
-    const payload: NewSave = { url: normalized, title: title.trim(), note: note.trim() || undefined, tags: parseTags(tags), type, source: source.trim() || undefined, imageUrl, collectionId };
+    const payload: NewSave = { url: normalized, title: title.trim(), note: note.trim() || undefined, tags: parseTags(tags), type, source: source.trim() || undefined, imageUrl, collectionId, details };
     const existing = findByUrl(normalized);
     if (existing && existing.id !== editingId) {
       Alert.alert('Already saved', `You saved this as “${existing.title}”. Save it again anyway?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Save again', onPress: () => onSubmit(payload) }]);
@@ -86,6 +102,8 @@ export function SaveForm({ initial, submitLabel, editingId, onSubmit }: Props) {
       <Text style={styles.previewTitle}>{title || (loading ? 'Looking at that link...' : 'Give it a title below')}</Text>
       <Text style={styles.previewMeta}>{source || 'Internet treasure'} · {type}</Text>
     </PaperCard> : null}
+    {smart.available && normalizeUrl(url) ? <SmartButton onPress={smartFill} busy={smart.busy} plan={smart.plan} label={details ? 'SMART FILL AGAIN' : 'SMART FILL'} /> : null}
+    {details ? <SmartDetailsCard details={details} /> : null}
     <Field label="Title"><Input value={title} onChangeText={v => { touched.current.title = true; setTitle(v); }} placeholder="What is it?" /></Field>
     <Field label="Note (optional)"><Input value={note} onChangeText={setNote} placeholder="Why did you save it?" multiline /></Field>
     <Field label="Tags"><Input value={tags} onChangeText={setTags} autoCapitalize="none" placeholder="travel, cafe, someday" /></Field>

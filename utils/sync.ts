@@ -1,3 +1,4 @@
+import { normalizeDetails } from '@/supabase/functions/_shared/enrich';
 import { Collection, SavedItem, SaveType } from '@/types';
 import type { Store } from './backup';
 
@@ -34,7 +35,7 @@ export function liveTombstones(local: Store, t: Tombstones): Tombstones {
 export type SaveRow = {
   user_id?: string; id: string; url: string; title: string; note: string | null; type: SaveType; source: string | null;
   image_url: string | null; tags: string[]; collection_id: string | null; is_favorite: boolean;
-  created_at: string; updated_at: string; last_rediscovered_at: string | null;
+  created_at: string; updated_at: string; last_rediscovered_at: string | null; details?: unknown;
 };
 export type CollectionRow = { user_id?: string; id: string; name: string; created_at: string; updated_at: string };
 
@@ -48,12 +49,14 @@ export const saveToRow = (s: SavedItem, userId: string): SaveRow => ({
   user_id: userId, id: s.id, url: s.url, title: s.title, note: s.note ?? null, type: s.type, source: s.source ?? null,
   image_url: s.imageUrl ?? null, tags: s.tags, collection_id: s.collectionId ?? null, is_favorite: s.isFavorite,
   created_at: s.createdAt, updated_at: s.updatedAt ?? s.createdAt, last_rediscovered_at: s.lastRediscoveredAt ?? null,
+  details: s.details ?? null,
 });
 
 export const rowToSave = (r: SaveRow): SavedItem => ({
   id: r.id, url: r.url, title: r.title, note: r.note ?? undefined, type: r.type, source: r.source ?? undefined,
   imageUrl: r.image_url ?? undefined, tags: r.tags ?? [], collectionId: r.collection_id ?? undefined, isFavorite: !!r.is_favorite,
   createdAt: iso(r.created_at) ?? new Date().toISOString(), updatedAt: iso(r.updated_at), lastRediscoveredAt: iso(r.last_rediscovered_at),
+  ...(normalizeDetails(r.details) ? { details: normalizeDetails(r.details) } : {}),
 });
 
 export const collectionToRow = (c: Collection, userId: string): CollectionRow => ({ user_id: userId, id: c.id, name: c.name, created_at: c.createdAt, updated_at: c.updatedAt ?? c.createdAt });

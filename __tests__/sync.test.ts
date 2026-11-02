@@ -47,3 +47,12 @@ describe('planForAccount', () => {
     expect(planForAccount({ ...initialSyncMeta(), owner: 'user_a' }, 'user_b')).toBe('switch');
   });
 });
+
+it('carries Smart Save details through the database row', () => {
+  const details = { kind: 'product' as const, name: 'Linen shirt', brand: 'Uniqlo', price: '39.90', currency: 'EUR', store: 'Uniqlo' };
+  const s = save('p', '2026-02-01T00:00:00.000Z', { details });
+  const row = saveToRow(s, 'user_1');
+  expect(row.details).toEqual(details);
+  expect(rowToSave(row).details).toEqual(details);
+  expect(rowToSave({ ...row, details: { kind: 'nonsense' } }).details).toBeUndefined();
+});
