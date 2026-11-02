@@ -31,9 +31,9 @@ export function SaveForm({ initial, submitLabel, editingId, onSubmit }: Props) {
   const [collectionId, setCollectionId] = useState(initial?.collectionId);
   const [loading, setLoading] = useState(false);
   // Remember which fields the person typed themselves so fetched metadata never overwrites them.
-  const touched = useRef({ title: !!initial?.title, type: !!initial?.type, source: !!initial?.source });
+  const touched = useRef({ title: !!initial?.title, type: !!editingId, source: !!editingId });
   // When editing, the existing details are already the person's choice; only re-fetch if the link changes.
-  const lookedUp = useRef(initial?.title ? initial.url ?? '' : '');
+  const lookedUp = useRef(editingId ? initial?.url ?? '' : '');
 
   useEffect(() => {
     const normalized = normalizeUrl(url);
