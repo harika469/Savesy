@@ -1,24 +1,30 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { StyleSheet, Text } from 'react-native';
+import { SaveForm } from '@/components/SaveForm';
 import { Screen } from '@/components/Screen';
-import { Field, FilterChip, Input, PaperCard, PrimaryButton, ScreenHeader } from '@/components/ui';
+import { ScreenHeader } from '@/components/ui';
 import { colors } from '@/constants/theme';
 import { useSaves } from '@/context/SavesContext';
-import { SaveType } from '@/types';
-import { inferMetadata } from '@/utils/saves';
+import { extractUrl } from '@/utils/metadata';
 
-const types: SaveType[] = ['article', 'video', 'product', 'place', 'social', 'other'];
+/** Also reachable as savesy://add?url=https://… so other apps and shortcuts can hand Savesy a link. */
 export default function AddScreen() {
-  const router = useRouter(); const { addSave, collections } = useSaves();
-  const [url, setUrl] = useState(''); const [title, setTitle] = useState(''); const [note, setNote] = useState(''); const [tags, setTags] = useState(''); const [type, setType] = useState<SaveType>('other'); const [source, setSource] = useState(''); const [collectionId, setCollectionId] = useState<string>();
-  useEffect(() => { if (!url.trim()) return; const timer = setTimeout(() => { const meta = inferMetadata(url); setTitle(current => current || meta.title); setSource(meta.source); setType(meta.type); }, 350); return () => clearTimeout(timer); }, [url]);
-  const save = () => { if (!url.trim() || !title.trim()) { Alert.alert('Almost there', 'Add a link and a title first.'); return; } const item = addSave({ url: url.trim(), title: title.trim(), note: note.trim() || undefined, tags: tags.split(',').map(t => t.trim()).filter(Boolean), type, source: source.trim() || undefined, collectionId }); setUrl(''); setTitle(''); setNote(''); setTags(''); setSource(''); setType('other'); setCollectionId(undefined); router.push({ pathname: '/save/[id]', params: { id: item.id } }); };
-  return <Screen variant={2}><ScreenHeader title="save the thing." subtitle="drop it here. future-you will thank you." /><View style={styles.form}><Field label="The link"><Input value={url} onChangeText={setUrl} autoCapitalize="none" keyboardType="url" placeholder="Paste a link" /></Field>
-    {url ? <PaperCard style={styles.preview}><Text style={styles.previewLabel}>QUICK PREVIEW</Text><Text style={styles.previewTitle}>{title || 'Looking at that link...'}</Text><Text style={styles.previewMeta}>{source || 'Internet treasure'} · {type}</Text></PaperCard> : null}
-    <Field label="Title"><Input value={title} onChangeText={setTitle} placeholder="What is it?" /></Field><Field label="Note (optional)"><Input value={note} onChangeText={setNote} placeholder="Why did you save it?" multiline /></Field><Field label="Tags"><Input value={tags} onChangeText={setTags} placeholder="travel, cafe, someday" /></Field>
-    <Field label="Type"><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>{types.map(value => <FilterChip key={value} label={value.toUpperCase()} active={type === value} onPress={() => setType(value)} />)}</ScrollView></Field>
-    <Field label="Collection"><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}><FilterChip label="NONE" active={!collectionId} onPress={() => setCollectionId(undefined)} />{collections.map(c => <FilterChip key={c.id} label={c.name} active={collectionId === c.id} onPress={() => setCollectionId(c.id)} />)}</ScrollView></Field>
-    <PrimaryButton label="SAVE IT" icon="bookmark-outline" onPress={save} /><Text style={styles.brain}>straight to the brain 🧠</Text></View></Screen>;
+  const router = useRouter();
+  const { addSave } = useSaves();
+  const params = useLocalSearchParams<{ url?: string; text?: string }>();
+  const incoming = params.url ?? (params.text ? extractUrl(params.text) : undefined);
+  // Remount the form after each save (and for each incoming link) so it starts clean.
+  const [formKey, setFormKey] = useState(0);
+  return <Screen variant={2}>
+    <ScreenHeader title="save the thing." subtitle="drop it here. future-you will thank you." />
+    <SaveForm key={`${formKey}-${incoming ?? ''}`} initial={incoming ? { url: incoming } : undefined} submitLabel="SAVE IT" onSubmit={(input) => {
+      const item = addSave(input);
+      setFormKey(k => k + 1);
+      router.setParams({ url: undefined, text: undefined });
+      router.push({ pathname: '/save/[id]', params: { id: item.id } });
+    }} />
+    <Text style={styles.brain}>straight to the brain 🧠</Text>
+  </Screen>;
 }
-const styles = StyleSheet.create({ form: { gap: 19 }, row: { gap: 8 }, preview: { backgroundColor: colors.mint, borderColor: colors.mint, shadowOpacity: 0 }, previewLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 1.5, color: colors.purpleDark }, previewTitle: { fontSize: 19, fontWeight: '900', marginTop: 12 }, previewMeta: { color: colors.gray, marginTop: 5, textTransform: 'capitalize' }, brain: { textAlign: 'center', fontSize: 13, fontStyle: 'italic', marginTop: -8, color: colors.purpleDark } });
+const styles = StyleSheet.create({ brain: { textAlign: 'center', fontSize: 13, fontStyle: 'italic', marginTop: 12, color: colors.purpleDark } });

@@ -7,6 +7,7 @@ export interface SavedItem {
   note?: string;
   type: SaveType;
   source?: string;
+  imageUrl?: string;
   tags: string[];
   collectionId?: string;
   isFavorite: boolean;
