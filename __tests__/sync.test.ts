@@ -38,3 +38,12 @@ it('round-trips a save through a database row', () => {
   expect(row).toMatchObject({ user_id: 'user-1', image_url: 'https://i', collection_id: 'k', is_favorite: true });
   expect(rowToSave({ ...row, updated_at: '2026-02-01T00:00:00+00:00' })).toEqual(s);
 });
+
+describe('planForAccount', () => {
+  const { planForAccount, initialSyncMeta } = jest.requireActual('@/utils/sync') as typeof import('@/utils/sync');
+  it('adopts guest data, keeps the same owner, and never mixes accounts', () => {
+    expect(planForAccount(initialSyncMeta(), 'user_a')).toBe('adopt');
+    expect(planForAccount({ ...initialSyncMeta(), owner: 'user_a' }, 'user_a')).toBe('same');
+    expect(planForAccount({ ...initialSyncMeta(), owner: 'user_a' }, 'user_b')).toBe('switch');
+  });
+});

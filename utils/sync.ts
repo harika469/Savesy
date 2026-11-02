@@ -4,6 +4,27 @@ import type { Store } from './backup';
 export type Tombstones = { saves: string[]; collections: string[] };
 export const emptyTombstones = (): Tombstones => ({ saves: [], collections: [] });
 
+/** Per-phone sync bookkeeping, saved next to the library. */
+export type SyncMeta = {
+  tombstones: Tombstones;
+  /** Clerk user id whose data is on this phone; undefined = guest data, not tied to an account. */
+  owner?: string;
+  /** True while the library is still the untouched first-launch demo. */
+  demo: boolean;
+};
+export const initialSyncMeta = (): SyncMeta => ({ tombstones: emptyTombstones(), demo: true });
+
+/**
+ * What to do with this phone's data when `userId` is signed in:
+ * - same: it's already theirs, just sync.
+ * - adopt: guest data joins the account (untouched demo is dropped if the account has saves).
+ * - switch: another account's data is here; clear it first so accounts never mix.
+ */
+export function planForAccount(meta: SyncMeta, userId: string): 'same' | 'adopt' | 'switch' {
+  if (meta.owner === userId) return 'same';
+  return meta.owner ? 'switch' : 'adopt';
+}
+
 /** A deleted id that is back on the phone (re-added, restored, demo reset) is no longer deleted. */
 export function liveTombstones(local: Store, t: Tombstones): Tombstones {
   const saves = new Set(local.saves.map(s => s.id)); const collections = new Set(local.collections.map(c => c.id));

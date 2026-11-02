@@ -2,26 +2,22 @@ import type { Store } from '@/utils/backup';
 import { CollectionRow, collectionToRow, mergeStores, rowToCollection, rowToSave, SaveRow, saveToRow, Tombstones } from '@/utils/sync';
 import { getSupabase } from './supabase';
 
-export type SyncResult = { remote: Store; userId: string; deletedConfirmed: Tombstones; uploaded: number };
+/** `replacedLocal`: the cloud copy should replace this phone's data instead of merging with it. */
+export type SyncResult = { remote: Store; userId: string; deletedConfirmed: Tombstones; uploaded: number; replacedLocal: boolean };
 
 /** Turns Supabase/network errors into something a person can act on. */
 export function friendlyCloudError(message: string): string {
   if (/fetch|network|timed? ?out|ECONN/i.test(message)) return 'Can’t reach the cloud right now.';
-  if (/anonymous sign-ins are disabled/i.test(message)) return 'Anonymous sign-ins are turned off in Supabase (Authentication → Sign In / Providers).';
+  if (/jwt|jws|token|PGRST301|PGRST302/i.test(message)) return 'Supabase didn’t accept your login. Check that Clerk is added as a third-party auth provider in Supabase.';
   if (/does not exist|could not find the table|schema cache/i.test(message)) return 'The Savesy tables are missing in Supabase. Run supabase/migrations in the SQL editor.';
-  if (/invalid api key|jwt|apikey/i.test(message)) return 'The Supabase key in this build isn’t valid.';
+  if (/invalid api key|apikey/i.test(message)) return 'The Supabase key in this build isn’t valid.';
   return message.endsWith('.') ? message : `${message}.`;
 }
 
-async function ensureUser() {
+function client() {
   const supabase = getSupabase();
   if (!supabase) throw new Error('Cloud sync is not configured.');
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.user) return { supabase, userId: session.user.id };
-  // No account needed: each phone gets its own anonymous Supabase user.
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error || !data.user) throw new Error(error?.message ?? 'Could not sign in to the cloud.');
-  return { supabase, userId: data.user.id };
+  return supabase;
 }
 
 const check = <T>({ data, error }: { data: T | null; error: { message: string } | null }) => {
@@ -33,8 +29,8 @@ const check = <T>({ data, error }: { data: T | null; error: { message: string } 
  * One full round trip: push deletions, pull everything, merge with `local`, push what's newer here.
  * Returns the remote data so the caller can merge it into whatever the app state is *now*.
  */
-export async function syncWithCloud(local: Store, tombstones: Tombstones): Promise<SyncResult> {
-  const { supabase, userId } = await ensureUser();
+export async function syncWithCloud(local: Store, tombstones: Tombstones, userId: string, options: { keepCloudIfNotEmpty?: boolean } = {}): Promise<SyncResult> {
+  const supabase = client();
 
   if (tombstones.saves.length) check(await supabase.from('saves').delete().eq('user_id', userId).in('id', tombstones.saves));
   if (tombstones.collections.length) check(await supabase.from('collections').delete().eq('user_id', userId).in('id', tombstones.collections));
@@ -48,6 +44,9 @@ export async function syncWithCloud(local: Store, tombstones: Tombstones): Promi
     collections: check<CollectionRow[]>(collectionsRes).map(rowToCollection),
   };
 
+  // Untouched demo content shouldn't be pushed into an account that already has saves.
+  const replacedLocal = !!options.keepCloudIfNotEmpty && (remote.saves.length > 0 || remote.collections.length > 0);
+  if (replacedLocal) local = { saves: [], collections: [] };
   const { upload } = mergeStores(local, remote, tombstones);
   // Collections first, so saves can reference them.
   if (upload.collections.length) check(await supabase.from('collections').upsert(upload.collections.map(c => collectionToRow(c, userId)), { onConflict: 'user_id,id' }));
@@ -57,6 +56,6 @@ export async function syncWithCloud(local: Store, tombstones: Tombstones): Promi
   const withUploads = <T extends { id: string }>(down: T[], up: T[]) => [...new Map([...down, ...up].map(x => [x.id, x])).values()];
   return {
     remote: { saves: withUploads(remote.saves, upload.saves), collections: withUploads(remote.collections, upload.collections) },
-    userId, deletedConfirmed: tombstones, uploaded: upload.saves.length + upload.collections.length,
+    userId, deletedConfirmed: tombstones, uploaded: upload.saves.length + upload.collections.length, replacedLocal,
   };
 }

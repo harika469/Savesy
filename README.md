@@ -9,7 +9,7 @@ Savesy is a local-first Expo SDK 54 mobile app for saving the good things you fi
 - **Rediscover** — a rotating pick of something you saved a while ago.
 - **Share to Savesy** — tap Share in any app (browser, YouTube, Instagram, Maps…) and pick **Savesy** (Android) or **Save to Savesy** (iOS). The Save screen opens with the link, the page title and any extra shared text as the note. Needs a development or installed build, not Expo Go (see below).
 - **Deep link** — `savesy://add?url=https://…` opens the Save screen with the link filled in (handy for iOS Shortcuts / Android share automations).
-- **Cloud sync (Supabase)** — when configured, every change is synced to Supabase a moment later and when the app comes back to the foreground. No sign-up: each install gets its own anonymous account. The phone keeps a full copy, so Savesy works offline and catches up later. Without configuration it stays local-only.
+- **Accounts (Clerk) + cloud sync (Supabase)** — sign in with just your email and a one-time code (no passwords). Signed in, every change syncs to Supabase a moment later and when the app comes back to the foreground, so your saves follow you to any phone. Guest saves move into your account when you first sign in. The phone always keeps a full copy, so Savesy works offline. Without configuration it stays local-only.
 - **Your stash** (tap the smiley on Home) — counts, plus backup: share or copy your whole library as a backup, restore it from the clipboard (merges, never overwrites), bring back the demo, or erase everything.
 - Seeded demo content, on-device persistence, favorites, sharing and opening the original link.
 
@@ -29,20 +29,33 @@ The terminal will show a QR code. Connect your computer and phone to the same ne
 
 You can also press `a` in the Expo terminal to open an installed Android emulator. A local iOS simulator requires macOS and Xcode. Press `w` to run the web preview; the intended experience is Android or iOS.
 
-## Cloud sync with Supabase
+## Accounts and cloud sync (Clerk + Supabase)
 
+Clerk handles sign-in; Supabase stores the saves. Supabase trusts Clerk's session tokens directly (Clerk is a Supabase *third-party auth provider*), and row-level security keeps each account's rows private.
+
+**1. Clerk**
+1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com).
+2. **Configure → User & authentication → Email**: turn on **Sign-up with email** and **Sign-in with email** using **Email verification code**, keep **Verify at sign-up** on, and turn **Password** off. Savesy's sign-in screen is a passwordless email-code flow.
+3. Enable the **Native API** (Configure → Native applications) — Clerk requires it for mobile apps.
+4. Open the [Supabase integration setup](https://dashboard.clerk.com/setup/supabase), choose **Activate Supabase integration**, and copy the **Clerk domain**. This adds the `role: authenticated` claim Supabase needs.
+
+**2. Supabase**
 1. Create a project at [supabase.com](https://supabase.com).
-2. **SQL Editor** → paste and run [`supabase/migrations/20261102000000_savesy_schema.sql`](supabase/migrations/20261102000000_savesy_schema.sql). It creates `collections` and `saves` with row-level security so each account only sees its own rows. It's safe to re-run. (With the Supabase CLI: `supabase link` then `supabase db push`.)
-3. **Authentication → Sign In / Providers** → turn on **Allow anonymous sign-ins**. Also consider enabling CAPTCHA or rate limits there, since anyone with the app can create an anonymous account.
-4. Copy `.env.example` to `.env` and fill in the project URL and publishable (anon) key from **Project Settings → API**. Restart the dev server (`npm start -- --clear`).
-5. For EAS builds, add the same two variables to the EAS environment (`eas env:create --name EXPO_PUBLIC_SUPABASE_URL --value … --environment preview`, and the same for the key) or to the `env` block of the build profile in `eas.json`.
+2. **Authentication → Sign In / Providers → Add provider → Clerk**, and paste the Clerk domain.
+3. **SQL Editor**: run both files in [`supabase/migrations/`](supabase/migrations/) in order. The second switches row ownership to Clerk user ids (`auth.jwt()->>'sub'`). Both are safe to re-run. (With the Supabase CLI: `supabase link` then `supabase db push`.)
 
-Your stash (smiley on Home) shows the sync status and has a **Sync now** button.
+**3. The app**
+1. Copy `.env.example` to `.env` and fill in the Clerk publishable key and the Supabase URL + publishable key. Restart with `npm start -- --clear`.
+2. For EAS builds, add the same variables to the EAS environment (`eas env:create --name EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value … --environment preview`, and likewise for the Supabase ones) or to the `env` block of the build profile in `eas.json`.
 
-How syncing works (`lib/cloudSync.ts`, `utils/sync.ts`):
-- Ids are made on the phone, so saving works offline. Every change stamps `updatedAt`; when the phone and cloud disagree, the newer copy wins.
-- Deletions are remembered until the cloud confirms them.
-- An anonymous account lives on one install. Uninstalling or clearing app data starts a new account, so keep using **Share a backup** if you care about moving phones. Linking an email to the anonymous account is the natural next step for multi-device use.
+Login works in Expo Go. On first launch Savesy offers sign-in once; closing it keeps you in guest mode. Your stash (smiley on Home) has the account, sign-out and sync status.
+
+How it behaves (`components/Account.tsx`, `lib/cloudSync.ts`, `utils/sync.ts`):
+- Ids are made on the phone, so saving works offline. Every change stamps `updatedAt`; when the phone and cloud disagree, the newer copy wins. Deletions are remembered until the cloud confirms them.
+- First sign-in: guest saves are added to the account. If you never touched the demo content and the account already has saves, the demo is dropped instead of being uploaded.
+- Signing in as a different account on the same phone clears the previous account's data first, so accounts never mix.
+- Sign out syncs first, warns if anything couldn't be uploaded, then clears the phone. Your saves stay in your account.
+- Clerk only (no Supabase settings): you can sign in, but saves stay on the phone.
 
 ## Share-to-Savesy builds
 
@@ -85,6 +98,7 @@ Data is stored on-device with AsyncStorage under `@savesy/v1`. Clearing Expo Go'
 - `components/SaveForm.tsx` — the shared add/edit form
 - `components/ShareIntentHandler.tsx` + `app/+native-intent.tsx` — receive shares from other apps
 - `utils/` — link metadata and URL helpers, search, share parsing, backup/restore, and dates
-- `lib/` — Supabase client and cloud sync
+- `lib/` — Supabase client (sends the Clerk token) and cloud sync
+- `components/Account.tsx`, `app/sign-in.tsx` — Clerk provider and the email-code sign-in screen
 - `supabase/migrations/` — database schema and row-level security
 - `__tests__/` — Jest unit tests (`jest-expo` preset)

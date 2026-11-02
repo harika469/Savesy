@@ -3,6 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { useAccount } from '@/components/Account';
 import { HandwrittenNote } from '@/components/Doodles';
 import { Screen } from '@/components/Screen';
 import { PaperCard, ScreenHeader } from '@/components/ui';
@@ -21,7 +22,8 @@ function notify(title: string, body: string) {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { saves, collections, importBackup, resetToDemo, clearAll, cloud, syncNow } = useSaves();
+  const { saves, collections, importBackup, resetToDemo, clearAll, cloud, syncNow, forgetLocalData } = useSaves();
+  const account = useAccount();
   const favorites = saves.filter(s => s.isFavorite).length;
   const backup = () => serializeBackup({ saves, collections });
 
@@ -38,16 +40,29 @@ export default function SettingsScreen() {
     }
   };
 
+  const signOut = async () => {
+    // Push anything pending first, so nothing is lost when this phone is cleared.
+    const synced = cloud.state === 'off' ? true : await syncNow();
+    const body = synced
+      ? 'Your saves stay in your account. This phone will be cleared until you sign in again.'
+      : 'Some changes haven’t reached the cloud yet and will be lost. Make a backup first if you want to keep them.';
+    confirm('Sign out?', body, 'Sign out', async () => {
+      try { await account.signOut(); forgetLocalData(); }
+      catch { notify('Couldn’t sign out', 'Check your connection and try again.'); }
+    });
+  };
+
   return <Screen variant={0}>
     <Pressable accessibilityLabel="Go back" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} hitSlop={12} style={styles.back}><Ionicons name="arrow-back" size={24} /></Pressable>
-    <ScreenHeader title="your stash." subtitle={cloud.state === 'off' ? 'it all lives on this phone. keep a copy somewhere safe.' : 'kept on this phone and synced to the cloud.'} />
+    <ScreenHeader title="your stash." subtitle={account.signedIn && cloud.state !== 'off' ? 'kept on this phone and synced to your account.' : 'it all lives on this phone. keep a copy somewhere safe.'} />
     <View style={styles.stats}>
       <Stat value={saves.length} label="saves" color={colors.pinkSoft} />
       <Stat value={collections.length} label="collections" color={colors.mint} />
       <Stat value={favorites} label="favorites" color={colors.sky} />
     </View>
-    <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Cloud</Text>
-    <CloudCard status={cloud} onSync={syncNow} />
+    <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Account</Text>
+    {account.configured ? <AccountCard email={account.email} signedIn={account.signedIn} loaded={account.loaded} onSignIn={() => router.push('/sign-in')} onSignOut={signOut} /> : null}
+    {account.signedIn || !account.configured ? <View style={account.configured ? { marginTop: 12 } : undefined}><CloudCard status={cloud} onSync={() => { void syncNow(); }} /></View> : null}
     <View style={styles.sectionRow}><Text style={styles.section}>Backup</Text><HandwrittenNote rotate="2deg">future-you says thanks</HandwrittenNote></View>
     <PaperCard style={styles.group}>
       <Row icon="share-outline" title="Share a backup" body="Send it to notes, email or a cloud drive." onPress={shareBackup} />
@@ -67,14 +82,15 @@ const cloudCopy = (s: CloudStatus) => {
   const time = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   switch (s.state) {
     case 'off': return { icon: 'cloud-offline-outline' as const, title: 'Only on this phone', body: 'Cloud sync isn’t set up in this build, so saves stay on this device. Backups below still work.', color: colors.soft };
+    case 'signedOut': return { icon: 'cloud-offline-outline' as const, title: 'Not syncing', body: 'Sign in to back up your saves.', color: colors.soft };
     case 'syncing': return { icon: 'sync-outline' as const, title: 'Syncing…', body: 'Sending your saves to the cloud.', color: colors.sky };
-    case 'synced': return { icon: 'cloud-done-outline' as const, title: 'Saved to the cloud', body: `Last synced ${time(s.at)} · account ${s.userId.slice(0, 8)}`, color: colors.mint };
+    case 'synced': return { icon: 'cloud-done-outline' as const, title: 'Saved to the cloud', body: `Last synced ${time(s.at)}`, color: colors.mint };
     case 'error': return { icon: 'cloud-offline-outline' as const, title: 'Couldn’t sync', body: `${s.message} Your saves are safe on this phone and will sync when it works again.`, color: colors.peach };
   }
 };
 
 function CloudCard({ status, onSync }: { status: CloudStatus; onSync: () => void }) {
-  const c = cloudCopy(status);
+  const c = cloudCopy(status)!;
   return <PaperCard style={[styles.cloud, { backgroundColor: c.color, borderColor: c.color }]}>
     <View style={styles.cloudRow}>
       <View style={styles.cloudIcon}><Ionicons name={c.icon} size={22} color={colors.purpleDark} /></View>
@@ -84,6 +100,26 @@ function CloudCard({ status, onSync }: { status: CloudStatus; onSync: () => void
       {status.state === 'syncing' ? <ActivityIndicator size="small" color={colors.purpleDark} /> : <Ionicons name="refresh" size={16} color={colors.purpleDark} />}
       <Text style={styles.syncText}>SYNC NOW</Text>
     </Pressable> : null}
+  </PaperCard>;
+}
+
+function AccountCard({ email, signedIn, loaded, onSignIn, onSignOut }: { email?: string; signedIn: boolean; loaded: boolean; onSignIn: () => void; onSignOut: () => void }) {
+  if (!loaded) return <PaperCard style={styles.cloudRow}><ActivityIndicator color={colors.purpleDark} /><Text style={styles.rowBody}>Connecting to your account… Your saves work offline meanwhile.</Text></PaperCard>;
+  if (!signedIn) {
+    return <PaperCard style={[styles.cloud, { backgroundColor: colors.yellow, borderColor: colors.yellow }]}>
+      <View style={styles.cloudRow}>
+        <View style={styles.cloudIcon}><Ionicons name="person-circle-outline" size={24} color={colors.purpleDark} /></View>
+        <View style={{ flex: 1 }}><Text style={styles.rowTitle}>You’re saving as a guest</Text><Text style={styles.cloudBody}>Sign in with your email to back up your saves and use them on any phone. Your current saves come with you.</Text></View>
+      </View>
+      <Pressable accessibilityRole="button" onPress={onSignIn} style={({ pressed }) => [styles.syncButton, pressed && { opacity: .6 }]}><Ionicons name="log-in-outline" size={16} color={colors.purpleDark} /><Text style={styles.syncText}>SIGN IN</Text></Pressable>
+    </PaperCard>;
+  }
+  return <PaperCard style={styles.group}>
+    <View style={[styles.row, styles.rowBorder]}>
+      <View style={styles.rowIcon}><Ionicons name="person-outline" size={20} color={colors.purpleDark} /></View>
+      <View style={{ flex: 1 }}><Text style={styles.rowTitle}>Signed in</Text><Text style={styles.rowBody}>{email ?? 'Your Savesy account'}</Text></View>
+    </View>
+    <Row icon="log-out-outline" title="Sign out" body="Your saves stay in your account." onPress={onSignOut} last />
   </PaperCard>;
 }
 
