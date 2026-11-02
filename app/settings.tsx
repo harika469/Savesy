@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { HandwrittenNote } from '@/components/Doodles';
 import { Screen } from '@/components/Screen';
 import { PaperCard, ScreenHeader } from '@/components/ui';
 import { colors, radii } from '@/constants/theme';
-import { useSaves } from '@/context/SavesContext';
+import { CloudStatus, useSaves } from '@/context/SavesContext';
 import { serializeBackup } from '@/utils/backup';
 
 // Alert buttons don't exist on web; fall back to the browser's confirm there.
@@ -21,7 +21,7 @@ function notify(title: string, body: string) {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { saves, collections, importBackup, resetToDemo, clearAll } = useSaves();
+  const { saves, collections, importBackup, resetToDemo, clearAll, cloud, syncNow } = useSaves();
   const favorites = saves.filter(s => s.isFavorite).length;
   const backup = () => serializeBackup({ saves, collections });
 
@@ -40,12 +40,14 @@ export default function SettingsScreen() {
 
   return <Screen variant={0}>
     <Pressable accessibilityLabel="Go back" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} hitSlop={12} style={styles.back}><Ionicons name="arrow-back" size={24} /></Pressable>
-    <ScreenHeader title="your stash." subtitle="it all lives on this phone. keep a copy somewhere safe." />
+    <ScreenHeader title="your stash." subtitle={cloud.state === 'off' ? 'it all lives on this phone. keep a copy somewhere safe.' : 'kept on this phone and synced to the cloud.'} />
     <View style={styles.stats}>
       <Stat value={saves.length} label="saves" color={colors.pinkSoft} />
       <Stat value={collections.length} label="collections" color={colors.mint} />
       <Stat value={favorites} label="favorites" color={colors.sky} />
     </View>
+    <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Cloud</Text>
+    <CloudCard status={cloud} onSync={syncNow} />
     <View style={styles.sectionRow}><Text style={styles.section}>Backup</Text><HandwrittenNote rotate="2deg">future-you says thanks</HandwrittenNote></View>
     <PaperCard style={styles.group}>
       <Row icon="share-outline" title="Share a backup" body="Send it to notes, email or a cloud drive." onPress={shareBackup} />
@@ -59,6 +61,30 @@ export default function SettingsScreen() {
     </PaperCard>
     <Text style={styles.footer}>savesy. · made for the things you swear you’ll come back to.</Text>
   </Screen>;
+}
+
+const cloudCopy = (s: CloudStatus) => {
+  const time = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  switch (s.state) {
+    case 'off': return { icon: 'cloud-offline-outline' as const, title: 'Only on this phone', body: 'Cloud sync isn’t set up in this build, so saves stay on this device. Backups below still work.', color: colors.soft };
+    case 'syncing': return { icon: 'sync-outline' as const, title: 'Syncing…', body: 'Sending your saves to the cloud.', color: colors.sky };
+    case 'synced': return { icon: 'cloud-done-outline' as const, title: 'Saved to the cloud', body: `Last synced ${time(s.at)} · account ${s.userId.slice(0, 8)}`, color: colors.mint };
+    case 'error': return { icon: 'cloud-offline-outline' as const, title: 'Couldn’t sync', body: `${s.message} Your saves are safe on this phone and will sync when it works again.`, color: colors.peach };
+  }
+};
+
+function CloudCard({ status, onSync }: { status: CloudStatus; onSync: () => void }) {
+  const c = cloudCopy(status);
+  return <PaperCard style={[styles.cloud, { backgroundColor: c.color, borderColor: c.color }]}>
+    <View style={styles.cloudRow}>
+      <View style={styles.cloudIcon}><Ionicons name={c.icon} size={22} color={colors.purpleDark} /></View>
+      <View style={{ flex: 1 }}><Text style={styles.rowTitle}>{c.title}</Text><Text style={styles.cloudBody}>{c.body}</Text></View>
+    </View>
+    {status.state !== 'off' ? <Pressable accessibilityRole="button" disabled={status.state === 'syncing'} onPress={onSync} style={({ pressed }) => [styles.syncButton, (pressed || status.state === 'syncing') && { opacity: .6 }]}>
+      {status.state === 'syncing' ? <ActivityIndicator size="small" color={colors.purpleDark} /> : <Ionicons name="refresh" size={16} color={colors.purpleDark} />}
+      <Text style={styles.syncText}>SYNC NOW</Text>
+    </Pressable> : null}
+  </PaperCard>;
 }
 
 function Stat({ value, label, color }: { value: number; label: string; color: string }) {
@@ -86,5 +112,11 @@ const styles = StyleSheet.create({
   rowIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.lavender, alignItems: 'center', justifyContent: 'center' },
   rowTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
   rowBody: { fontSize: 12, color: colors.gray, marginTop: 2, lineHeight: 17 },
+  cloud: { shadowOpacity: 0, gap: 14 },
+  cloudRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  cloudIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  cloudBody: { fontSize: 12, color: colors.ink, marginTop: 2, lineHeight: 17, opacity: .75 },
+  syncButton: { alignSelf: 'flex-start', flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: colors.white, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
+  syncText: { fontSize: 11, fontWeight: '900', letterSpacing: 1, color: colors.purpleDark },
   footer: { textAlign: 'center', color: colors.gray, fontSize: 12, marginTop: 30, fontStyle: 'italic' },
 });

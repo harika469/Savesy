@@ -12,6 +12,8 @@ export interface SavedItem {
   collectionId?: string;
   isFavorite: boolean;
   createdAt: string;
+  /** Set on every change; the newer copy wins when syncing with the cloud. */
+  updatedAt?: string;
   lastRediscoveredAt?: string;
 }
 
@@ -19,6 +21,7 @@ export interface Collection {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
-export type NewSave = Omit<SavedItem, 'id' | 'createdAt' | 'isFavorite'>;
+export type NewSave = Omit<SavedItem, 'id' | 'createdAt' | 'updatedAt' | 'isFavorite'>;
