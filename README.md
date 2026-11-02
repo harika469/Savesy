@@ -9,6 +9,7 @@ Savesy is a local-first Expo SDK 54 mobile app for saving the good things you fi
 - **Rediscover** — a rotating pick of something you saved a while ago.
 - **Share to Savesy** — tap Share in any app (browser, YouTube, Instagram, Maps…) and pick **Savesy** (Android) or **Save to Savesy** (iOS). The Save screen opens with the link, the page title and any extra shared text as the note. Needs a development or installed build, not Expo Go (see below).
 - **Deep link** — `savesy://add?url=https://…` opens the Save screen with the link filled in (handy for iOS Shortcuts / Android share automations).
+- **Your stash** (tap the smiley on Home) — counts, plus backup: share or copy your whole library as a backup, restore it from the clipboard (merges, never overwrites), bring back the demo, or erase everything.
 - Seeded demo content, on-device persistence, favorites, sharing and opening the original link.
 
 ## Run it
@@ -50,6 +51,7 @@ Notes:
 
 ```bash
 npm run typecheck
+npm test            # unit tests for link parsing, search, sharing and backups
 npm run android
 npm run ios
 npm run web
@@ -66,4 +68,5 @@ Data is stored on-device with AsyncStorage under `@savesy/v1`. Clearing Expo Go'
 - `types/` — domain types
 - `components/SaveForm.tsx` — the shared add/edit form
 - `components/ShareIntentHandler.tsx` + `app/+native-intent.tsx` — receive shares from other apps
-- `utils/` — link metadata fetching and URL helpers, search, and date helpers
+- `utils/` — link metadata and URL helpers, search, share parsing, backup/restore, and dates
+- `__tests__/` — Jest unit tests (`jest-expo` preset)

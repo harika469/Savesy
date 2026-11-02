@@ -3,7 +3,7 @@ import { useRootNavigationState, useRouter } from 'expo-router';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import React, { PropsWithChildren, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { extractUrl } from '@/utils/metadata';
+import { shareToSaveParams } from '@/utils/share';
 
 // Expo Go and the web preview have no share extension, so the native module stays off there.
 export const shareIntentDisabled = Platform.OS === 'web' || Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
@@ -21,13 +21,8 @@ function ShareIntentRouter() {
 
   useEffect(() => {
     if (!hasShareIntent || !navigatorReady) return;
-    const text = shareIntent.text?.trim() ?? '';
-    const url = shareIntent.webUrl ?? (text ? extractUrl(text) : undefined);
-    const title = shareIntent.meta?.title?.trim();
-    // Shared text that isn't just the link becomes the note ("Look at this! https://…").
-    const leftover = url ? text.replace(url, '').trim() : text;
-    const note = leftover && leftover !== title ? leftover : undefined;
-    router.navigate({ pathname: '/add', params: { url, sharedTitle: title, sharedNote: note, shareId: String(Date.now()) } });
+    const prefill = shareToSaveParams(shareIntent);
+    if (prefill) router.navigate({ pathname: '/add', params: { ...prefill, shareId: String(Date.now()) } });
     resetShareIntent();
   }, [hasShareIntent, navigatorReady, shareIntent, resetShareIntent, router]);
 

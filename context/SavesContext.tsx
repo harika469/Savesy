@@ -2,10 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { seedCollections, seedSaves } from '@/constants/seed';
 import { Collection, NewSave, SavedItem, SaveType } from '@/types';
+import { mergeBackup, parseBackup, Store } from '@/utils/backup';
 import { matchesSave, sameUrl } from '@/utils/saves';
 
 const STORAGE_KEY = '@savesy/v1';
-type Store = { saves: SavedItem[]; collections: Collection[] };
 export type SearchOptions = { type?: SaveType; favoritesOnly?: boolean };
 type ContextValue = Store & {
   ready: boolean;
@@ -19,6 +19,10 @@ type ContextValue = Store & {
   searchSaves: (query: string, options?: SearchOptions) => SavedItem[];
   findByUrl: (url: string) => SavedItem | undefined;
   getRediscoverItem: (excludedId?: string) => SavedItem | undefined;
+  /** Merges a backup's JSON into the library; throws a friendly Error if it isn't one. */
+  importBackup: (json: string) => { addedSaves: number; addedCollections: number };
+  resetToDemo: () => void;
+  clearAll: () => void;
 };
 
 const SavesContext = createContext<ContextValue | null>(null);
@@ -62,6 +66,14 @@ export function SavesProvider({ children }: PropsWithChildren) {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     findByUrl: (url) => store.saves.find(item => sameUrl(item.url, url)),
     getRediscoverItem: (excludedId) => [...store.saves].filter(item => item.id !== excludedId).sort((a, b) => new Date(a.lastRediscoveredAt ?? a.createdAt).getTime() - new Date(b.lastRediscoveredAt ?? b.createdAt).getTime())[0],
+    importBackup: (json) => {
+      const incoming = parseBackup(json);
+      const result = mergeBackup(store, incoming);
+      update(s => mergeBackup(s, incoming).store);
+      return { addedSaves: result.addedSaves, addedCollections: result.addedCollections };
+    },
+    resetToDemo: () => update(() => ({ saves: seedSaves, collections: seedCollections })),
+    clearAll: () => update(() => ({ saves: [], collections: [] })),
   }), [ready, store, update]);
   return <SavesContext.Provider value={value}>{children}</SavesContext.Provider>;
 }
