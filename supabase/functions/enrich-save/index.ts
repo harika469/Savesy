@@ -2,6 +2,8 @@
 //
 // Deploy:  supabase functions deploy enrich-save --no-verify-jwt
 //          supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   (optional: ANTHROPIC_MODEL)
+// OFF unless SMART_SAVES_ENABLED=true is set as a function secret. While off, every request is answered
+// with 503 before any credit, page fetch or Claude call (see ../_shared/enrichHandler.ts).
 // JWT verification at the gateway is off because requests carry Clerk tokens; the function
 // authenticates them through the database instead (consume_ai_credit runs as the caller, so
 // Supabase validates the Clerk token and row-level security applies).
@@ -9,12 +11,14 @@
 import Anthropic from 'npm:@anthropic-ai/sdk';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  buildUserMessage, EnrichRequest, EnrichResponse, isSafePublicUrl, normalizeSmartResult, oembedContext,
-  oembedEndpoint, pageContext, PlanInfo, SMART_SCHEMA, SYSTEM_PROMPT,
+  buildUserMessage, EnrichRequest, isSafePublicUrl, normalizeSmartResult, oembedContext,
+  oembedEndpoint, pageContext, SMART_SCHEMA, SYSTEM_PROMPT,
 } from '../_shared/enrich.ts';
+import { handleEnrich, smartSavesEnabled } from '../_shared/enrichHandler.ts';
 
 const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-opus-5-5';
-const anthropic = new Anthropic(); // reads ANTHROPIC_API_KEY
+// Bounded: one attempt of at most 60 s plus one retry keeps the worst case far below any reservation lease.
+const anthropic = new Anthropic({ timeout: 60_000, maxRetries: 1 }); // reads ANTHROPIC_API_KEY
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -24,8 +28,6 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
-const reply = (body: EnrichResponse, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 const BROWSER_UA = 'Mozilla/5.0 (compatible; SavesyBot/1.0; +https://savesy.app/bot)';
 
@@ -90,41 +92,20 @@ async function askClaude(req: EnrichRequest, context: string) {
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  if (request.method !== 'POST') return reply({ ok: false, reason: 'bad_request', message: 'Use POST.' }, 405);
-
-  const auth = request.headers.get('Authorization');
-  if (!auth?.startsWith('Bearer ')) return reply({ ok: false, reason: 'unauthorized', message: 'Sign in to use Smart Saves.' }, 401);
-
-  let body: EnrichRequest;
-  try { body = await request.json(); } catch { return reply({ ok: false, reason: 'bad_request', message: 'Invalid request.' }, 400); }
-  const url = typeof body?.url === 'string' ? body.url.trim() : '';
-  if (!url || url.length > 4000 || !isSafePublicUrl(url)) return reply({ ok: false, reason: 'bad_request', message: 'That link can’t be read.' }, 400);
-  const req: EnrichRequest = { url, title: typeof body.title === 'string' ? body.title.slice(0, 300) : undefined, note: typeof body.note === 'string' ? body.note.slice(0, 1000) : undefined };
-
-  // Runs as the caller: Supabase validates the Clerk token, the function enforces the plan allowance.
-  const asUser = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: auth } } });
-  const credit = await asUser.rpc('consume_ai_credit');
-  if (credit.error) return reply({ ok: false, reason: 'unauthorized', message: 'Sign in again to use Smart Saves.' }, 401);
-  const plan = credit.data as PlanInfo & { allowed: boolean; user_id: string };
-  const planInfo: PlanInfo = { plan: plan.plan, used: plan.used, limit: plan.limit };
-  if (!plan.allowed) {
-    return reply({ ok: false, reason: 'limit', message: plan.plan === 'pro' ? 'You’ve hit this month’s fair-use limit.' : `You’ve used all ${plan.limit} free Smart Saves this month.`, plan: planInfo }, 402);
-  }
-
-  const userId = plan.user_id; // verified by the database, not decoded here
-  const refund = async () => {
-    if (!userId) return;
-    await createClient(SUPABASE_URL, SERVICE_KEY).rpc('refund_ai_credit', { uid: userId });
-  };
-
-  try {
-    const result = await askClaude(req, await linkContext(url));
-    if (!result) { await refund(); return reply({ ok: false, reason: 'failed', message: 'Couldn’t make sense of that link.' }, 422); }
-    return reply({ ok: true, result, plan: planInfo });
-  } catch (e) {
-    console.error('enrich-save failed', e instanceof Error ? e.message : e);
-    await refund();
-    return reply({ ok: false, reason: 'failed', message: 'Smart Save didn’t work this time. You weren’t charged a credit.' }, 502);
-  }
+  // Read per request so flipping the secret takes effect without redeploying code.
+  const enabled = smartSavesEnabled(Deno.env.get('SMART_SAVES_ENABLED'));
+  const { status, body } = await handleEnrich(
+    { method: request.method, authorization: request.headers.get('Authorization'), readJson: () => request.json() },
+    {
+      enabled,
+      consumeCredit: async (authorization) =>
+        await createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authorization } } }).rpc('consume_ai_credit'),
+      refundCredit: async (userId) => await createClient(SUPABASE_URL, SERVICE_KEY).rpc('refund_ai_credit', { uid: userId }),
+      linkContext,
+      askClaude,
+      log: (message, detail) => console.error(message, detail ?? ''),
+    },
+  );
+  if (body === null) return new Response('ok', { headers: cors });
+  return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 });

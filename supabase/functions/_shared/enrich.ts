@@ -21,7 +21,7 @@ export type SmartResult = {
 export type EnrichRequest = { url: string; title?: string; note?: string };
 export type EnrichResponse =
   | { ok: true; result: SmartResult; plan: PlanInfo }
-  | { ok: false; reason: 'limit' | 'unauthorized' | 'bad_request' | 'failed'; message: string; plan?: PlanInfo };
+  | { ok: false; reason: 'disabled' | 'limit' | 'unauthorized' | 'bad_request' | 'failed'; message: string; plan?: PlanInfo };
 export type PlanInfo = { plan: 'free' | 'pro'; used: number; limit: number };
 
 const str = { type: 'string' } as const;

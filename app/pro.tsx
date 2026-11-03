@@ -52,8 +52,19 @@ export default function ProScreen() {
   };
 
   const isPro = plan?.plan === 'pro';
+  const close = () => router.canGoBack() ? router.back() : router.replace('/');
+
+  // Beta: Pro isn't offered. No prices, plans or purchase-like buttons while Smart Saves are switched off.
+  if (!smartSavesAvailable) {
+    return <Screen variant={2}>
+      <Pressable accessibilityLabel="Close" onPress={close} hitSlop={12} style={styles.back}><Ionicons name="close" size={26} /></Pressable>
+      <ScreenHeader title="pro is coming later." subtitle="everything in this beta is free." />
+      <PaperCard style={styles.thanks}><Text style={styles.usageBody}>Savesy Pro isn’t available yet. Saving, collections, search, sharing to Savesy and backups all work without it.</Text></PaperCard>
+    </Screen>;
+  }
+
   return <Screen variant={2}>
-    <Pressable accessibilityLabel="Close" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} hitSlop={12} style={styles.back}><Ionicons name="close" size={26} /></Pressable>
+    <Pressable accessibilityLabel="Close" onPress={close} hitSlop={12} style={styles.back}><Ionicons name="close" size={26} /></Pressable>
     <ScreenHeader title={isPro ? 'you’re pro.' : 'go pro.'} subtitle={isPro ? 'thank you for keeping Savesy going 💜' : 'let Savesy do the organizing.'} />
 
     {account.signedIn && smartSavesAvailable ? <PaperCard style={styles.usage}>
