@@ -61,6 +61,8 @@ How it behaves (`components/Account.tsx`, `lib/cloudSync.ts`, `utils/sync.ts`):
 
 ## Smart Saves and Pro
 
+> **Beta (November 2026): Smart Saves and Pro are switched off.** The app hides them unless `EXPO_PUBLIC_SMART_SAVES_ENABLED=true`, and the edge function refuses every request with 503 (before any credit, page fetch or Claude call) unless its secret `SMART_SAVES_ENABLED=true` is set. Don't enable either until the credit redesign in issue #1 has passed staging.
+
 Needs the Clerk + Supabase setup above.
 
 1. Run `supabase/migrations/20261104000000_smart_saves.sql` (adds `saves.details`, `entitlements`, `ai_usage`, `pro_interest` and the `get_plan` / `consume_ai_credit` / `refund_ai_credit` functions). Allowances are enforced in the database: 10 Smart Saves a month on Free, 500 on Pro (fair use). Change them in `savesy_limits()`.
@@ -100,6 +102,7 @@ Notes:
 ```bash
 npm run typecheck
 npm test            # unit tests for link parsing, search, sharing and backups
+npm run test:db     # database tests: applies every migration to a disposable PostgreSQL database that emulates Supabase (needs psql/createdb; set PGHOST/PGPORT/PGUSER)
 npm run android
 npm run ios
 npm run web
