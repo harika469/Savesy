@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SaveCard } from '@/components/SaveCard';
+import { ConflictBanner } from '@/components/ConflictBanner';
 import { Screen } from '@/components/Screen';
 import { Field, Input, PrimaryButton } from '@/components/ui';
 import { colors } from '@/constants/theme';
@@ -27,6 +28,7 @@ export default function CollectionDetailScreen() {
         <Pressable accessibilityLabel="Delete collection" onPress={remove} style={styles.icon}><Ionicons name="trash-outline" size={21} /></Pressable>
       </View>
     </View>
+    <ConflictBanner table="collections" id={collection.id} />
     <Text style={styles.eyebrow}>YOUR LITTLE WORLD</Text><Text style={styles.title}>{collection.name}</Text>
     <Text style={styles.count}>{items.length} {items.length === 1 ? 'save lives' : 'saves live'} here</Text>
     <View style={styles.list}>{items.map(item => <SaveCard key={item.id} item={item} onFavorite={() => toggleFavorite(item.id)} />)}{items.length === 0 ? <View style={styles.empty}><Ionicons name="sparkles-outline" size={38} /><Text style={styles.emptyTitle}>room for treasures.</Text><Text style={styles.emptyBody}>Choose this collection next time you save something.</Text></View> : null}</View>
