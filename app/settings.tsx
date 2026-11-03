@@ -23,7 +23,7 @@ function notify(title: string, body: string) {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { saves, collections, importBackup, resetToDemo, clearAll, cloud, syncNow, forgetLocalData } = useSaves();
+  const { saves, collections, importBackup, resetToDemo, clearAll, cloud, syncNow, pendingCount, conflicts, storageError } = useSaves();
   const account = useAccount();
   const favorites = saves.filter(s => s.isFavorite).length;
   const backup = () => serializeBackup({ saves, collections });
@@ -42,20 +42,27 @@ export default function SettingsScreen() {
   };
 
   const signOut = async () => {
-    // Push anything pending first, so nothing is lost when this phone is cleared.
+    // Try to sync first. Nothing is erased either way: this account's library stays on the phone,
+    // hidden while signed out, and anything unsynced syncs the next time this account signs in.
     const synced = cloud.state === 'off' ? true : await syncNow();
-    const body = synced
-      ? 'Your saves stay in your account. This phone will be cleared until you sign in again.'
-      : 'Some changes haven’t reached the cloud yet and will be lost. Make a backup first if you want to keep them.';
+    const waiting = pendingCount + conflicts.length;
+    const body = synced || waiting === 0
+      ? 'Your saves are in your account. Signing back in brings them back on this phone.'
+      : `${waiting} ${waiting === 1 ? 'change hasn’t' : 'changes haven’t'} synced yet. ${waiting === 1 ? 'It stays' : 'They stay'} on this phone and will sync the next time you sign in.`;
     confirm('Sign out?', body, 'Sign out', async () => {
-      try { await account.signOut(); forgetLocalData(); }
+      try { await account.signOut(); }
       catch { notify('Couldn’t sign out', 'Check your connection and try again.'); }
     });
   };
+  const syncing = account.signedIn && cloud.state !== 'off' && cloud.state !== 'signedOut';
 
   return <Screen variant={0}>
     <Pressable accessibilityLabel="Go back" onPress={() => router.canGoBack() ? router.back() : router.replace('/')} hitSlop={12} style={styles.back}><Ionicons name="arrow-back" size={24} /></Pressable>
-    <ScreenHeader title="your stash." subtitle={account.signedIn && cloud.state !== 'off' ? 'kept on this phone and synced to your account.' : 'it all lives on this phone. keep a copy somewhere safe.'} />
+    <ScreenHeader title="your stash." subtitle={syncing ? 'kept on this phone and synced to your account.' : 'it all lives on this phone. keep a copy somewhere safe.'} />
+    {storageError ? <PaperCard style={[styles.cloud, { backgroundColor: colors.peach, borderColor: colors.peach, marginBottom: 16 }]}>
+      <Text style={styles.rowTitle}>Savesy couldn’t save to this phone’s storage</Text>
+      <Text style={styles.cloudBody}>Recent changes may not survive closing the app. Free up some space, then make a backup below. ({storageError})</Text>
+    </PaperCard> : null}
     <View style={styles.stats}>
       <Stat value={saves.length} label="saves" color={colors.pinkSoft} />
       <Stat value={collections.length} label="collections" color={colors.mint} />
@@ -69,6 +76,15 @@ export default function SettingsScreen() {
     <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Account</Text>
     {account.configured ? <AccountCard email={account.email} signedIn={account.signedIn} loaded={account.loaded} onSignIn={() => router.push('/sign-in')} onSignOut={signOut} /> : null}
     {account.signedIn || !account.configured ? <View style={account.configured ? { marginTop: 12 } : undefined}><CloudCard status={cloud} onSync={() => { void syncNow(); }} /></View> : null}
+    {syncing && conflicts.length ? <PaperCard style={[styles.group, { marginTop: 12 }]}>
+      {conflicts.map((c, i) => {
+        const title = c.table === 'saves' ? saves.find(x => x.id === c.id)?.title : collections.find(x => x.id === c.id)?.name;
+        return <Row key={`${c.table}:${c.id}`} icon="git-compare-outline" title={title ?? 'Untitled'}
+          body={c.kind === 'deletedRemotely' ? 'Deleted on another device, but you changed it here.' : `Changed on another device too: ${c.fields.join(', ')}.`}
+          onPress={() => c.table === 'saves' ? router.push({ pathname: '/save/[id]', params: { id: c.id } }) : router.push({ pathname: '/collection/[id]', params: { id: c.id } })}
+          last={i === conflicts.length - 1} />;
+      })}
+    </PaperCard> : null}
     <View style={styles.sectionRow}><Text style={styles.section}>Backup</Text><HandwrittenNote rotate="2deg">future-you says thanks</HandwrittenNote></View>
     <PaperCard style={styles.group}>
       <Row icon="share-outline" title="Share a backup" body="Send it to notes, email or a cloud drive." onPress={shareBackup} />
@@ -78,7 +94,8 @@ export default function SettingsScreen() {
     <Text style={[styles.section, { marginTop: 30, marginBottom: 12 }]}>Start over</Text>
     <PaperCard style={styles.group}>
       <Row icon="sparkles-outline" title="Bring back the demo" body="Replaces everything with the example saves." onPress={() => confirm('Bring back the demo?', 'Your current saves and collections will be replaced. Make a backup first if you want to keep them.', 'Replace', resetToDemo)} />
-      <Row icon="trash-outline" title="Erase everything" body="Deletes all saves and collections on this phone." danger onPress={() => confirm('Erase everything?', 'This deletes all your saves and collections and can’t be undone.', 'Erase', clearAll)} last />
+      <Row icon="trash-outline" title="Erase everything" body={syncing ? 'Deletes all saves and collections in your account, on every device.' : 'Deletes all saves and collections on this phone.'} danger
+        onPress={() => confirm('Erase everything?', syncing ? 'This deletes all your saves and collections from your account on every device, and can’t be undone. Make a backup first if you might want them back.' : 'This deletes all your saves and collections and can’t be undone.', 'Erase', clearAll)} last />
     </PaperCard>
     <Text style={styles.footer}>savesy. · made for the things you swear you’ll come back to.</Text>
   </Screen>;
@@ -89,9 +106,11 @@ const cloudCopy = (s: CloudStatus) => {
   switch (s.state) {
     case 'off': return { icon: 'cloud-offline-outline' as const, title: 'Only on this phone', body: 'Cloud sync isn’t set up in this build, so saves stay on this device. Backups below still work.', color: colors.soft };
     case 'signedOut': return { icon: 'cloud-offline-outline' as const, title: 'Not syncing', body: 'Sign in to back up your saves.', color: colors.soft };
-    case 'syncing': return { icon: 'sync-outline' as const, title: 'Syncing…', body: 'Sending your saves to the cloud.', color: colors.sky };
+    case 'syncing': return { icon: 'sync-outline' as const, title: 'Syncing…', body: 'Checking your saves with the cloud.', color: colors.sky };
+    case 'pending': return { icon: 'time-outline' as const, title: 'Waiting to sync', body: `${s.count} ${s.count === 1 ? 'change' : 'changes'} on this phone will sync in a moment.`, color: colors.sky };
+    case 'attention': return { icon: 'alert-circle-outline' as const, title: 'Needs your attention', body: `${s.conflicts} ${s.conflicts === 1 ? 'item was' : 'items were'} changed here and on another device. Nothing was overwritten: pick which version to keep.`, color: colors.yellow };
     case 'synced': return { icon: 'cloud-done-outline' as const, title: 'Saved to the cloud', body: `Last synced ${time(s.at)}`, color: colors.mint };
-    case 'error': return { icon: 'cloud-offline-outline' as const, title: 'Couldn’t sync', body: `${s.message} Your saves are safe on this phone and will sync when it works again.`, color: colors.peach };
+    case 'error': return { icon: 'cloud-offline-outline' as const, title: 'Couldn’t sync', body: `${s.message} ${s.pending ? `${s.pending} ${s.pending === 1 ? 'change is' : 'changes are'} safe on this phone and will sync when it works again.` : 'Your saves are safe on this phone.'}`, color: colors.peach };
   }
 };
 

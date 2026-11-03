@@ -2,33 +2,96 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { seedCollections, seedSaves } from '@/constants/seed';
-import { friendlyCloudError, syncWithCloud } from '@/lib/cloudSync';
+import { friendlyCloudError, supabaseTransport } from '@/lib/cloudSync';
 import { cloudConfigured } from '@/lib/supabase';
 import { Collection, NewSave, SavedItem, SaveType } from '@/types';
 import { mergeBackup, parseBackup, Store } from '@/utils/backup';
 import { matchesSave, sameUrl } from '@/utils/saves';
-import { emptyTombstones, initialSyncMeta, liveTombstones, mergeStores, planForAccount, SyncMeta, Tombstones } from '@/utils/sync';
+import { Conflict, emptyMeta, EngineState, fromLegacy, Local, pendingCount, resolveConflict as resolveInEngine, runSync, Table } from '@/utils/syncEngine';
 
-const STORAGE_KEY = '@savesy/v1';
-const SYNC_KEY = '@savesy/sync-v1';
-const EMPTY: Store = { saves: [], collections: [] };
+/*
+ * Local storage (v2): one library per account plus one for guest use, so signing out or switching accounts never
+ * erases anything (pending edits stay with their account and sync when it signs in again).
+ *   @savesy/v2/guest, @savesy/v2/user:<clerk id>  -> { version: 2, engine: { local, meta }, demo }
+ *   @savesy/v2/active                             -> last library shown (loads offline, before Clerk answers)
+ * Each change is ONE write of one key (library and sync bookkeeping together), and write failures are reported.
+ * The previous format (@savesy/v1 + @savesy/sync-v1) is migrated once into the matching library.
+ */
+const KEY = (scope: string) => `@savesy/v2/${scope}`;
+const ACTIVE_KEY = '@savesy/v2/active';
+const MIGRATED_KEY = '@savesy/v2/migrated-from-v1';
+const LEGACY_STORE_KEY = '@savesy/v1';
+const LEGACY_SYNC_KEY = '@savesy/sync-v1';
 const SYNC_DELAY_MS = 1500;
+
+type Persisted = { version: 2; engine: EngineState; demo: boolean };
+type Scope = string; // 'guest' | `user:${id}`
+const userScope = (id: string) => `user:${id}`;
+const isUserScope = (s: Scope) => s.startsWith('user:');
+
+const demoData = (): Persisted => ({ version: 2, engine: { local: { saves: seedSaves, collections: seedCollections }, meta: emptyMeta() }, demo: true });
+const emptyData = (): Persisted => ({ version: 2, engine: { local: { saves: [], collections: [] }, meta: emptyMeta() }, demo: false });
+const defaultFor = (scope: Scope) => (scope === 'guest' ? demoData() : emptyData());
+
+function parsePersisted(raw: string | null): Persisted | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Persisted;
+    const local = v?.engine?.local;
+    if (v?.version !== 2 || !Array.isArray(local?.saves) || !Array.isArray(local?.collections) || !v.engine.meta) return null;
+    return { version: 2, demo: !!v.demo, engine: { local: { saves: local.saves.map(s => ({ ...s, tags: s.tags ?? [] })), collections: local.collections }, meta: { ...emptyMeta(), ...v.engine.meta } } };
+  } catch { return null; }
+}
+async function loadScope(scope: Scope): Promise<Persisted> {
+  return parsePersisted(await AsyncStorage.getItem(KEY(scope))) ?? defaultFor(scope);
+}
+async function migrateFromV1(): Promise<Scope | undefined> {
+  if (await AsyncStorage.getItem(MIGRATED_KEY)) return undefined;
+  const [raw, rawSync] = await Promise.all([AsyncStorage.getItem(LEGACY_STORE_KEY), AsyncStorage.getItem(LEGACY_SYNC_KEY)]);
+  let target: Scope | undefined;
+  if (raw) {
+    try {
+      const store = JSON.parse(raw) as Store;
+      if (Array.isArray(store?.saves) && Array.isArray(store?.collections)) {
+        let sync: { owner?: string; demo?: boolean; tombstones?: { saves: string[]; collections: string[] } } = {};
+        try { sync = rawSync ? JSON.parse(rawSync) : {}; } catch { sync = {}; }
+        target = typeof sync.owner === 'string' ? userScope(sync.owner) : 'guest';
+        if (!(await AsyncStorage.getItem(KEY(target)))) {
+          const local: Local = { saves: store.saves.map(s => ({ ...s, tags: s.tags ?? [] })), collections: store.collections };
+          const data: Persisted = { version: 2, engine: fromLegacy(local, sync.owner ? sync.tombstones : undefined), demo: sync.demo === true };
+          await AsyncStorage.setItem(KEY(target), JSON.stringify(data));
+          await AsyncStorage.setItem(ACTIVE_KEY, target);
+        }
+      }
+    } catch { /* unreadable old data: leave it in place, untouched */ }
+  }
+  // The v1 keys are kept (not deleted) so an older build could still read them.
+  await AsyncStorage.setItem(MIGRATED_KEY, '1');
+  return target;
+}
 
 export type SearchOptions = { type?: SaveType; favoritesOnly?: boolean };
 export type CloudStatus =
   | { state: 'off' }
   | { state: 'signedOut' }
   | { state: 'syncing' }
-  | { state: 'synced'; at: string; userId: string }
-  | { state: 'error'; message: string; at: string };
+  | { state: 'pending'; count: number }
+  | { state: 'synced'; at: string }
+  | { state: 'attention'; conflicts: number }
+  | { state: 'error'; message: string; at: string; pending: number };
 
 type ContextValue = Store & {
   ready: boolean;
   cloud: CloudStatus;
-  /** Syncs right away; resolves true when everything reached the cloud. */
+  /** Changes on this phone the server hasn't acknowledged yet (excludes items waiting on a conflict decision). */
+  pendingCount: number;
+  /** Items changed both here and on another device (or deleted there while edited here). */
+  conflicts: Conflict[];
+  resolveConflict: (table: Table, id: string, choice: 'mine' | 'theirs') => void;
+  /** Set when saving to this phone's storage failed; cleared by the next successful write. */
+  storageError?: string;
+  /** Syncs now (waiting for any sync in flight); resolves true only when the server has acknowledged everything. */
   syncNow: () => Promise<boolean>;
-  /** After signing out: clears this phone so the next account starts clean (their saves stay in the cloud). */
-  forgetLocalData: () => void;
   addSave: (save: NewSave) => SavedItem;
   updateSave: (id: string, changes: Partial<SavedItem>) => void;
   deleteSave: (id: string) => void;
@@ -48,161 +111,189 @@ type ContextValue = Store & {
 const SavesContext = createContext<ContextValue | null>(null);
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
-
-function isStore(value: unknown): value is Store {
-  const v = value as Store;
-  return !!v && Array.isArray(v.saves) && Array.isArray(v.collections);
-}
+class ScopeChanged extends Error {}
 
 /**
- * `userId`: the signed-in Clerk user (null when signed out, undefined while Clerk is loading).
- * The library always lives on the phone; with an account it also syncs to Supabase.
+ * `userId`: the signed-in Clerk user (null when signed out, undefined while Clerk is still loading).
+ * The library always lives on the phone; with an account and cloud sync on, it also syncs to Supabase.
  */
 export function SavesProvider({ children, userId }: PropsWithChildren<{ userId?: string | null }>) {
-  const [store, setStore] = useState<Store>({ saves: seedSaves, collections: seedCollections });
-  const [meta, setMeta] = useState<SyncMeta>(initialSyncMeta);
-  const tombstones = meta.tombstones;
-  const setTombstones = useCallback((fn: (t: Tombstones) => Tombstones) => setMeta(m => ({ ...m, tombstones: fn(m.tombstones) })), []);
+  const ref = useRef<{ scope: Scope; data: Persisted }>({ scope: 'guest', data: demoData() });
+  const [, setVersion] = useState(0);
+  const rerender = useCallback(() => setVersion(v => v + 1), []);
   const [ready, setReady] = useState(false);
   const [cloud, setCloud] = useState<CloudStatus>({ state: cloudConfigured ? 'signedOut' : 'off' });
-
-  // Refs let the async sync read the latest state without re-creating callbacks.
-  const storeRef = useRef(store); storeRef.current = store;
-  const tombRef = useRef(tombstones); tombRef.current = tombstones;
-  const metaRef = useRef(meta); metaRef.current = meta;
-  const userRef = useRef(userId); userRef.current = userId;
-  const keepCloud = useRef(false);
-  const syncing = useRef(false);
-  const again = useRef(false);
+  const [storageError, setStorageError] = useState<string>();
+  const writeChain = useRef<Promise<void>>(Promise.resolve());
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const inflight = useRef<Promise<boolean> | null>(null);
+  const queued = useRef(false);
+  const switching = useRef<Promise<void> | null>(null);
 
-  useEffect(() => {
-    Promise.all([AsyncStorage.getItem(STORAGE_KEY), AsyncStorage.getItem(SYNC_KEY)])
-      .then(([value, sync]) => {
-        if (value) {
-          try {
-            const parsed: unknown = JSON.parse(value);
-            if (isStore(parsed)) setStore({ collections: parsed.collections, saves: parsed.saves.map(s => ({ ...s, tags: s.tags ?? [] })) });
-          } catch { /* keep friendly seed data */ }
-        }
-        let saved: Partial<SyncMeta> = {};
-        if (sync) { try { saved = JSON.parse(sync) as Partial<SyncMeta>; } catch { /* ignore */ } }
-        const t = saved.tombstones?.saves && saved.tombstones?.collections ? saved.tombstones : emptyTombstones();
-        // Older installs have no demo flag: anything already stored counts as the person's own data.
-        setMeta({ tombstones: t, owner: typeof saved.owner === 'string' ? saved.owner : undefined, demo: typeof saved.demo === 'boolean' ? saved.demo : !value });
-      })
-      .catch(() => { /* storage unavailable: run in memory */ })
-      .finally(() => setReady(true));
+  const persist = useCallback((scope: Scope, data: Persisted) => {
+    const json = JSON.stringify(data);
+    writeChain.current = writeChain.current
+      .then(() => AsyncStorage.setItem(KEY(scope), json))
+      .then(() => setStorageError(undefined))
+      .catch((e: unknown) => setStorageError(e instanceof Error ? e.message : 'Saving to this phone failed.'));
   }, []);
-  useEffect(() => { if (ready) AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(store)).catch(() => undefined); }, [ready, store]);
-  useEffect(() => { if (ready) AsyncStorage.setItem(SYNC_KEY, JSON.stringify(meta)).catch(() => undefined); }, [ready, meta]);
 
-  const runSync = useCallback(async (): Promise<boolean> => {
-    const uid = userRef.current;
-    if (!cloudConfigured || !uid) return false;
-    if (syncing.current) { again.current = true; return false; }
-    syncing.current = true;
+  /** Applies a new library to `scope`: shown if it's the active one, always written to storage. */
+  const commit = useCallback((scope: Scope, data: Persisted) => {
+    if (ref.current.scope === scope) { ref.current = { scope, data }; rerender(); }
+    persist(scope, data);
+  }, [persist, rerender]);
+
+  // ---------- sync ----------
+  const syncActive = () => cloudConfigured && isUserScope(ref.current.scope);
+
+  const runOnce = useCallback(async (): Promise<boolean> => {
+    const scope = ref.current.scope;
+    if (!cloudConfigured || !isUserScope(scope)) return false;
     setCloud({ state: 'syncing' });
-    let ok = false;
+    const guard = () => { if (ref.current.scope !== scope) throw new ScopeChanged(); };
     try {
-      const result = await syncWithCloud(storeRef.current, liveTombstones(storeRef.current, tombRef.current), uid, { keepCloudIfNotEmpty: keepCloud.current });
-      if (userRef.current !== uid) return false; // signed out or switched mid-sync: drop the result
-      keepCloud.current = false;
-      if (result.replacedLocal) setStore(mergeStores(EMPTY, result.remote).store);
-      // Merge into the *current* state so edits made while syncing aren't lost (they sync next round).
-      else setStore(current => mergeStores(current, result.remote, liveTombstones(current, tombRef.current)).store);
-      // Forget deletions the cloud has confirmed, and any for ids that came back locally.
-      const done = result.deletedConfirmed;
-      setTombstones(t => liveTombstones(storeRef.current, { saves: t.saves.filter(id => !done.saves.includes(id)), collections: t.collections.filter(id => !done.collections.includes(id)) }));
-      setMeta(m => ({ ...m, demo: result.replacedLocal ? false : m.demo }));
-      setCloud({ state: 'synced', at: now(), userId: result.userId });
-      ok = true;
+      const out = await runSync({
+        get: () => { guard(); return ref.current.data.engine; },
+        apply: fn => { guard(); commit(scope, { ...ref.current.data, engine: fn(ref.current.data.engine) }); },
+        transport: supabaseTransport(),
+      });
+      if (ref.current.scope !== scope) return false;
+      const pending = pendingCount(ref.current.data.engine);
+      if (out.conflicts > 0) setCloud({ state: 'attention', conflicts: out.conflicts });
+      else if (pending > 0) setCloud({ state: 'pending', count: pending });
+      else setCloud({ state: 'synced', at: now() });
+      return out.conflicts === 0 && pending === 0;
     } catch (e) {
-      setCloud({ state: 'error', message: friendlyCloudError(e instanceof Error ? e.message : 'Sync failed'), at: now() });
-    } finally {
-      syncing.current = false;
-      if (again.current) { again.current = false; void runSync(); }
+      if (e instanceof ScopeChanged) return false;
+      if (ref.current.scope === scope) {
+        setCloud({ state: 'error', message: friendlyCloudError(e instanceof Error ? e.message : 'Sync failed'), at: now(), pending: pendingCount(ref.current.data.engine) });
+      }
+      return false;
     }
-    return ok;
-  }, [setTombstones]);
+  }, [commit]);
+
+  /** Runs a sync, or waits for the one in flight plus one more round, so the result covers every edit made so far. */
+  const requestSync = useCallback((): Promise<boolean> => {
+    if (!syncActive()) return Promise.resolve(false);
+    if (inflight.current) { queued.current = true; return inflight.current; }
+    const loop = async () => {
+      let ok = false;
+      do { queued.current = false; ok = await runOnce(); } while (queued.current);
+      return ok;
+    };
+    inflight.current = loop().finally(() => { inflight.current = null; });
+    return inflight.current;
+  }, [runOnce]);
 
   const scheduleSync = useCallback(() => {
-    if (!cloudConfigured) return;
+    if (!syncActive()) return;
+    setCloud({ state: 'pending', count: pendingCount(ref.current.data.engine) });
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => { void runSync(); }, SYNC_DELAY_MS);
-  }, [runSync]);
+    timer.current = setTimeout(() => { void requestSync(); }, SYNC_DELAY_MS);
+  }, [requestSync]);
 
-  // When an account signs in (or on launch while signed in): line up local data with that account, then sync.
+  // ---------- loading and switching libraries ----------
   useEffect(() => {
-    if (!ready || !cloudConfigured || userId === undefined) return;
-    if (userId === null) { setCloud({ state: 'signedOut' }); return; }
-    const plan = planForAccount(metaRef.current, userId);
-    if (plan === 'switch') {
-      // Another account's data is on this phone: start empty and pull this account's saves.
-      storeRef.current = EMPTY; tombRef.current = emptyTombstones();
-      setStore(EMPTY);
-    }
-    keepCloud.current = plan === 'adopt' && metaRef.current.demo;
-    const next: SyncMeta = plan === 'switch' ? { tombstones: emptyTombstones(), owner: userId, demo: false } : { ...metaRef.current, owner: userId };
-    metaRef.current = next; setMeta(next);
-    void runSync();
-  }, [ready, userId, runSync]);
+    (async () => {
+      try {
+        const migrated = await migrateFromV1();
+        const last = (await AsyncStorage.getItem(ACTIVE_KEY)) ?? migrated ?? 'guest';
+        const scope = cloudConfigured ? last : 'guest';
+        ref.current = { scope, data: await loadScope(scope) };
+      } catch { /* storage unavailable: run in memory with the demo */ }
+      setReady(true);
+      rerender();
+    })();
+  }, [rerender]);
 
-  // Sync whenever the app comes back to the foreground.
+  const switchTo = useCallback(async (target: Scope) => {
+    const data = await loadScope(target);
+    if (isUserScope(target)) {
+      // Saves made while signed out join the account (the untouched demo never does).
+      const guest = ref.current.scope === 'guest' ? ref.current.data : await loadScope('guest');
+      const guestItems = guest.engine.local;
+      if (!guest.demo && (guestItems.saves.length || guestItems.collections.length)) {
+        const taken = { saves: new Set(data.engine.local.saves.map(s => s.id)), collections: new Set(data.engine.local.collections.map(c => c.id)) };
+        const idMap = new Map<string, string>();
+        const collections = guestItems.collections.map(c => { if (!taken.collections.has(c.id)) return c; const id = newId(); idMap.set(c.id, id); return { ...c, id }; });
+        const saves = guestItems.saves.map(s => {
+          const moved = s.collectionId && idMap.has(s.collectionId) ? { ...s, collectionId: idMap.get(s.collectionId) } : s;
+          return taken.saves.has(s.id) ? { ...moved, id: newId() } : moved;
+        });
+        data.engine = { ...data.engine, local: { saves: [...saves, ...data.engine.local.saves], collections: [...data.engine.local.collections, ...collections] } };
+        persist(target, data);
+        persist('guest', emptyData());
+      }
+    }
+    ref.current = { scope: target, data };
+    rerender();
+    AsyncStorage.setItem(ACTIVE_KEY, target).catch(() => undefined);
+  }, [persist, rerender]);
+
+  useEffect(() => {
+    if (!ready || !cloudConfigured || userId === undefined) return;   // Clerk still loading: keep the last library
+    const target = userId ? userScope(userId) : 'guest';
+    const done = () => { if (userId) void requestSync(); else setCloud({ state: 'signedOut' }); };
+    if (target === ref.current.scope) { done(); return; }
+    clearTimeout(timer.current);
+    const p = (switching.current ?? Promise.resolve()).then(() => switchTo(target)).then(done);
+    switching.current = p.finally(() => { if (switching.current === p) switching.current = null; });
+  }, [ready, userId, switchTo, requestSync]);
+
   useEffect(() => {
     if (!ready || !cloudConfigured) return;
-    const sub = AppState.addEventListener('change', state => { if (state === 'active') void runSync(); });
+    const sub = AppState.addEventListener('change', state => { if (state === 'active') void requestSync(); });
     return () => { sub.remove(); clearTimeout(timer.current); };
-  }, [ready, runSync]);
+  }, [ready, requestSync]);
 
-  /** Every local change goes through here: update state, then sync shortly after. */
-  const update = useCallback((fn: (current: Store) => Store) => {
-    setStore(fn);
-    if (metaRef.current.demo) setMeta(m => ({ ...m, demo: false }));
-    if (userRef.current) scheduleSync();
-  }, [scheduleSync]);
-  const bury = useCallback((saves: string[], collections: string[] = []) => {
-    // Deletions only matter for data that belongs to an account.
-    if (!cloudConfigured || !metaRef.current.owner || (!saves.length && !collections.length)) return;
-    setTombstones(t => ({ saves: [...new Set([...t.saves, ...saves])], collections: [...new Set([...t.collections, ...collections])] }));
-  }, []);
-  const editSaves = (s: Store, id: string, fn: (item: SavedItem) => SavedItem) => ({ ...s, saves: s.saves.map(item => item.id === id ? { ...fn(item), updatedAt: now() } : item) });
+  // ---------- edits ----------
+  /** Every local change goes through here: one write, then a sync shortly after (when signed in with sync on). */
+  const edit = useCallback((fn: (local: Local) => Local) => {
+    const { scope, data } = ref.current;
+    commit(scope, { ...data, demo: false, engine: { ...data.engine, local: fn(data.engine.local) } });
+    scheduleSync();
+  }, [commit, scheduleSync]);
+  const editSave = (local: Local, id: string, fn: (item: SavedItem) => SavedItem): Local =>
+    ({ ...local, saves: local.saves.map(item => item.id === id ? { ...fn(item), updatedAt: now() } : item) });
+
+  const engine = ref.current.data.engine;
+  const { saves, collections } = engine.local;
 
   const value = useMemo<ContextValue>(() => ({
-    ...store, ready, cloud,
-    syncNow: runSync,
-    forgetLocalData: () => {
-      clearTimeout(timer.current);
-      storeRef.current = EMPTY; setStore(EMPTY);
-      const next: SyncMeta = { tombstones: emptyTombstones(), demo: false };
-      metaRef.current = next; setMeta(next);
+    saves, collections, ready, cloud, storageError,
+    pendingCount: pendingCount(engine),
+    conflicts: engine.meta.conflicts,
+    resolveConflict: (table, id, choice) => {
+      const { scope, data } = ref.current;
+      commit(scope, { ...data, engine: resolveInEngine(data.engine, table, id, choice) });
+      scheduleSync();
     },
-    addSave: (input) => { const t = now(); const item: SavedItem = { ...input, id: newId(), createdAt: t, updatedAt: t, isFavorite: false }; update(s => ({ ...s, saves: [item, ...s.saves] })); return item; },
-    updateSave: (id, changes) => update(s => editSaves(s, id, item => ({ ...item, ...changes }))),
-    deleteSave: (id) => { bury([id]); update(s => ({ ...s, saves: s.saves.filter(item => item.id !== id) })); },
-    toggleFavorite: (id) => update(s => editSaves(s, id, item => ({ ...item, isFavorite: !item.isFavorite }))),
-    addCollection: (name) => { const t = now(); const item = { id: newId(), name: name.trim(), createdAt: t, updatedAt: t }; update(s => ({ ...s, collections: [...s.collections, item] })); return item; },
-    renameCollection: (id, name) => update(s => ({ ...s, collections: s.collections.map(c => c.id === id ? { ...c, name: name.trim(), updatedAt: now() } : c) })),
-    deleteCollection: (id) => { bury([], [id]); update(s => ({ collections: s.collections.filter(c => c.id !== id), saves: s.saves.map(item => item.collectionId === id ? { ...item, collectionId: undefined, updatedAt: now() } : item) })); },
-    searchSaves: (query, options = {}) => store.saves
+    syncNow: requestSync,
+    addSave: (input) => { const t = now(); const item: SavedItem = { ...input, id: newId(), createdAt: t, updatedAt: t, isFavorite: false }; edit(l => ({ ...l, saves: [item, ...l.saves] })); return item; },
+    updateSave: (id, changes) => edit(l => editSave(l, id, item => ({ ...item, ...changes }))),
+    deleteSave: (id) => edit(l => ({ ...l, saves: l.saves.filter(item => item.id !== id) })),
+    toggleFavorite: (id) => edit(l => editSave(l, id, item => ({ ...item, isFavorite: !item.isFavorite }))),
+    addCollection: (name) => { const t = now(); const item = { id: newId(), name: name.trim(), createdAt: t, updatedAt: t }; edit(l => ({ ...l, collections: [...l.collections, item] })); return item; },
+    renameCollection: (id, name) => edit(l => ({ ...l, collections: l.collections.map(c => c.id === id ? { ...c, name: name.trim(), updatedAt: now() } : c) })),
+    deleteCollection: (id) => edit(l => ({ collections: l.collections.filter(c => c.id !== id), saves: l.saves.map(item => item.collectionId === id ? { ...item, collectionId: undefined, updatedAt: now() } : item) })),
+    searchSaves: (query, options = {}) => saves
       .filter(item => (!options.type || item.type === options.type) && (!options.favoritesOnly || item.isFavorite) && matchesSave(item, query))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    findByUrl: (url) => store.saves.find(item => sameUrl(item.url, url)),
-    getRediscoverItem: (excludedId) => [...store.saves].filter(item => item.id !== excludedId).sort((a, b) => new Date(a.lastRediscoveredAt ?? a.createdAt).getTime() - new Date(b.lastRediscoveredAt ?? b.createdAt).getTime())[0],
+    findByUrl: (url) => saves.find(item => sameUrl(item.url, url)),
+    getRediscoverItem: (excludedId) => [...saves].filter(item => item.id !== excludedId).sort((a, b) => new Date(a.lastRediscoveredAt ?? a.createdAt).getTime() - new Date(b.lastRediscoveredAt ?? b.createdAt).getTime())[0],
     importBackup: (json) => {
       const incoming = parseBackup(json);
-      const result = mergeBackup(store, incoming);
-      update(s => mergeBackup(s, incoming).store);
+      const result = mergeBackup({ saves, collections }, incoming);
+      edit(l => mergeBackup(l, incoming).store);
       return { addedSaves: result.addedSaves, addedCollections: result.addedCollections };
     },
     resetToDemo: () => {
-      const keep = new Set(seedSaves.map(s => s.id)); const keepC = new Set(seedCollections.map(c => c.id));
-      bury(store.saves.filter(s => !keep.has(s.id)).map(s => s.id), store.collections.filter(c => !keepC.has(c.id)).map(c => c.id));
       const t = now();
-      update(() => ({ saves: seedSaves.map(s => ({ ...s, updatedAt: t })), collections: seedCollections.map(c => ({ ...c, updatedAt: t })) }));
+      edit(() => ({ saves: seedSaves.map(s => ({ ...s, updatedAt: t })), collections: seedCollections.map(c => ({ ...c, updatedAt: t })) }));
     },
-    clearAll: () => { bury(store.saves.map(s => s.id), store.collections.map(c => c.id)); update(() => ({ saves: [], collections: [] })); },
-  }), [store, ready, cloud, runSync, update, bury]);
+    clearAll: () => edit(() => ({ saves: [], collections: [] })),
+  }), [saves, collections, engine, ready, cloud, storageError, commit, scheduleSync, requestSync, edit]);
   return <SavesContext.Provider value={value}>{children}</SavesContext.Provider>;
 }
 
