@@ -222,6 +222,84 @@ describe('REQ-1 full re-download reconciles deletions', () => {
   });
 });
 
+describe('ChatGPT review of #3: paging, purges and restores', () => {
+  it('blocker 1: a full re-download with a row edited elsewhere mid-download neither removes it nor raises a false conflict', async () => {
+    const a = new Device(server, U);
+    for (let i = 1; i <= 6; i++) a.add(save(`s${i}`));
+    await a.sync();
+    const b = new Device(server, U, undefined, 2); await b.sync();
+    a.remove('saves', 's1'); await a.sync(); server.purgeTombstones();     // forces B into a full re-download
+    b.edit('s2', { note: 'B edited s2 offline' });                          // B has its own unsynced change to s2
+    let injected = false, downloadPages = 0;
+    server.beforePull = async () => {
+      // During B's re-download, after its first page (s2 was added first, so its old revision is on the last page,
+      // still ahead of B): A edits s2 (a different field) and syncs. A server that pinned the head at page 1 skips s2.
+      if (injected || !b.state.meta.needsResync) return;
+      if (++downloadPages === 2) {
+        injected = true;
+        a.edit('s2', { title: 's2 edited mid-download' }); await a.sync();
+      }
+    };
+    // Watch every intermediate state: s2 must never vanish or be flagged, not even transiently (a later pull
+    // healing it is not good enough: the user would have seen a false "deleted elsewhere" prompt).
+    const glitches: string[] = [];
+    const apply = b.apply;
+    b.apply = fn => {
+      apply(fn);
+      if (!b.get('s2')) glitches.push('s2 removed');
+      for (const c of b.state.meta.conflicts) if (c.id === 's2') glitches.push(`s2 conflict: ${c.kind}`);
+    };
+    const out = await b.sync();
+    server.beforePull = undefined;
+    expect(injected).toBe(true);
+    expect(glitches).toEqual([]);
+    expect(out.conflicts).toBe(0);                                         // no false "deleted elsewhere" conflict
+    expect(b.ids()).toEqual(['s2', 's3', 's4', 's5', 's6']);               // s1 deleted, s2 kept
+    expect(b.get('s2')).toMatchObject({ title: 's2 edited mid-download', note: 'B edited s2 offline' });
+    expect(server.row(U, 'saves', 's2')).toMatchObject({ title: 's2 edited mid-download', note: 'B edited s2 offline' });
+  });
+
+  it('blocker 2: a purge in the middle of a re-download restarts it (instead of failing) and still reconciles', async () => {
+    const a = new Device(server, U); for (const id of ['k1', 'k2', 'k3', 'gone1', 'gone2']) a.add(save(id)); await a.sync();
+    const b = new Device(server, U, undefined, 1); await b.sync();
+    a.remove('saves', 'gone1'); await a.sync(); server.purgeTombstones();
+    let injected = false;
+    server.beforePull = async () => {
+      if (!injected && b.state.meta.needsResync) { injected = true; a.remove('saves', 'gone2'); await a.sync(); server.purgeTombstones(); }
+    };
+    expect(await b.sync()).toEqual({ pending: 0, conflicts: 0 });
+    server.beforePull = undefined;
+    expect(b.ids()).toEqual(['k1', 'k2', 'k3']);
+    expect(server.row(U, 'saves', 'gone1')).toBeUndefined();
+    expect(server.row(U, 'saves', 'gone2')).toBeUndefined();
+  });
+
+  it('keeping an item deleted elsewhere is sent as an explicit restore; a plain upsert over a tombstone would conflict', async () => {
+    const a = new Device(server, U); a.add(save('s1')); await a.sync();
+    const b = new Device(server, U); await b.sync();
+    a.remove('saves', 's1'); await a.sync();
+    b.edit('s1', { note: 'keep this' }); await b.sync();
+    b.resolve('saves', 's1', 'mine');
+    expect(pendingChanges(b.state)).toEqual([expect.objectContaining({ id: 's1', op: 'restore' })]);
+    expect(await b.sync()).toEqual({ pending: 0, conflicts: 0 });
+    expect(server.row(U, 'saves', 's1')).toMatchObject({ deleted_at: null, note: 'keep this' });
+    expect(server.push(U, [{ table: 'saves', id: 's1', base_rev: server.row(U, 'saves', 's1')!.rev as number, op: 'delete' }])[0].status).toBe('applied');
+    const tomb = server.row(U, 'saves', 's1')!;
+    expect(server.push(U, [{ table: 'saves', id: 's1', base_rev: tomb.rev as number, op: 'upsert', row: { url: 'https://x', title: 'x' } }])[0].status).toBe('conflict');
+  });
+
+  it('a delete retried after a lost response is harmless (noop or conflict, never an error or a second revision)', async () => {
+    const a = new Device(server, U); a.add(save('s1')); await a.sync();
+    const base = a.state.meta.base.saves.s1.rev;
+    expect(server.push(U, [{ table: 'saves', id: 's1', base_rev: base, op: 'delete' }])[0].status).toBe('applied');   // response "lost"
+    a.remove('saves', 's1');
+    const head = server.users.get(U)!.head;
+    expect(await a.sync()).toEqual({ pending: 0, conflicts: 0 });
+    expect(server.users.get(U)!.head).toBe(head);
+    expect(a.ids()).toEqual([]);
+  });
+});
+
 describe('REQ-2 pending edits survive offline work and failures', () => {
   it('offline edits are kept through failed pulls and pushes and upload once the network is back', async () => {
     const a = new Device(server, U); a.add(save('s1')); await a.sync();

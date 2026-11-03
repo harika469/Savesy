@@ -43,11 +43,13 @@ export type EngineState = { local: Local; meta: SyncMeta };
 
 export const emptyMeta = (): SyncMeta => ({ cursor: 0, base: { saves: {}, collections: {} }, conflicts: [], needsResync: false, legacyDeletes: { saves: [], collections: [] } });
 
-export type PushChange = { table: Table; id: string; base_rev: number; op: 'upsert' | 'delete'; row?: Record<string, unknown> };
+export type PushChange = { table: Table; id: string; base_rev: number; op: 'upsert' | 'delete' | 'restore'; row?: Record<string, unknown> };
 export type PushResult = { table: Table; id: string; status: 'applied' | 'conflict' | 'noop'; rev?: number; server?: ServerRow | null };
 export type PullPage = { resync: boolean; head: number; floor: number; changes: { table: Table; row: ServerRow }[]; next_cursor: number; more: boolean };
 export interface SyncTransport {
-  pull(since: number, head: number | null, limit: number): Promise<PullPage>;
+  /** Keyset paging on rev (no pinned head): repeat with next_cursor until more = false. `full`: a download from 0 that
+   *  rebuilds from scratch (the server then skips the tombstone-floor check). */
+  pull(since: number, limit: number, full: boolean): Promise<PullPage>;
   push(changes: PushChange[]): Promise<PushResult[]>;
 }
 
@@ -190,7 +192,8 @@ export function pendingChanges(s: EngineState): PushChange[] {
       if (conflictOf(s, table, id) || !isDirty(s, table, id)) continue;
       const L = getLocal(s, table, id);
       const B = s.meta.base[table][id];
-      if (L) out.push({ table, id, base_rev: B?.rev ?? 0, op: 'upsert', row: toPushRow(table, L) });
+      // Bringing back something the server has as deleted is an explicit 'restore' (a plain upsert would conflict).
+      if (L) out.push({ table, id, base_rev: B?.rev ?? 0, op: B && B.item === null ? 'restore' : 'upsert', row: toPushRow(table, L) });
       else if (B?.item) out.push({ table, id, base_rev: B.rev, op: 'delete' });
     }
   }
@@ -203,7 +206,11 @@ export function applyPushResults(s: EngineState, sent: { change: PushChange; sna
   for (const r of results) {
     const entry = sent.find(x => x.change.table === r.table && x.change.id === r.id);
     if (!entry) continue;
-    if (r.status === 'noop') { next = setBase(next, r.table, r.id, null); continue; }
+    if (r.status === 'noop') {
+      // Nothing to delete: the server never had it (no row) or already has it deleted (tombstone row).
+      next = r.server ? setBase(next, r.table, r.id, { rev: (r.server as ServerRow).rev, item: fromRow(r.table, r.server as ServerRow) }) : setBase(next, r.table, r.id, null);
+      continue;
+    }
     if (r.status === 'conflict') {
       if (r.server) next = applyServerRow(next, r.table, r.server as ServerRow);
       else next = { ...next, meta: { ...next.meta, needsResync: true } };   // the server has no row any more: reconcile fully
@@ -243,17 +250,21 @@ async function pullAll(io: SyncIO): Promise<void> {
   const limit = io.pageSize ?? 500;
   let resync = io.get().meta.needsResync;
   let since = resync ? 0 : io.get().meta.cursor;
-  let head: number | null = null;
+  // A download that starts at 0 (first sync or re-download) is a full one: it gets every row and reconciles at the end.
+  let full = since === 0;
+  let restarts = 0;
   const seen = new Set<string>();
+  // Keyset paging (no pinned head): a row changed while we page moves ahead of the cursor and is delivered later
+  // at its newest version, so when a page says more = false every row that exists has been seen at its latest.
   for (let guard = 0; guard < 100000; guard++) {
-    const page = await io.transport.pull(since, head, limit);
+    const page = await io.transport.pull(since, limit, full);
     if (page.resync) {
-      if (resync) throw new Error('The server asked for a re-download twice.');
-      resync = true; since = 0; head = null; seen.clear();
+      // The server purged deletions newer than our cursor (possibly mid-download): start again from 0.
+      if (++restarts > 3) throw new Error('The server kept asking for a re-download.');
+      resync = true; full = true; since = 0; seen.clear();
       io.apply(s => ({ ...s, meta: { ...s.meta, needsResync: true } }));
       continue;
     }
-    head = page.head;
     const rows = page.changes;
     const cursorAfter = page.next_cursor;
     io.apply(s => {
@@ -266,8 +277,8 @@ async function pullAll(io: SyncIO): Promise<void> {
     if (!page.more) break;
   }
   if (resync) {
-    const finalHead = head ?? since;
-    io.apply(s => { const t = reconcileResync(s, seen); return { ...t, meta: { ...t.meta, needsResync: false, cursor: finalHead } }; });
+    const finalCursor = since;
+    io.apply(s => { const t = reconcileResync(s, seen); return { ...t, meta: { ...t.meta, needsResync: false, cursor: finalCursor } }; });
   }
 }
 

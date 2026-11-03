@@ -19,8 +19,8 @@ export function supabaseTransport(): SyncTransport {
     return supabase;
   };
   return {
-    async pull(since, head, limit): Promise<PullPage> {
-      const { data, error } = await client().rpc('pull_changes', { p_since: since, p_head: head, p_limit: limit });
+    async pull(since, limit, full): Promise<PullPage> {
+      const { data, error } = await client().rpc('pull_changes', { p_since: since, p_limit: limit, p_full: full });
       if (error) throw new Error(error.message);
       return data as PullPage;
     },

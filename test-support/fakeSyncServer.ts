@@ -1,7 +1,7 @@
 /**
  * In-memory stand-in for the B1 sync server (supabase/migrations/20261106000000_sync_revisions.sql), following its rules:
  * per-user revisions, conditional writes, noop deletes, scrubbed tombstones, collection delete detaching saves,
- * saves only pointing at live collections, ordered paged pulls with a pinned head, floors and resync.
+ * saves only pointing at live collections, keyset-paged pulls (no pinned head), floors and resync, explicit restore.
  * Plus failure injection, and the legacy (pre-B2) direct table API with B1's RLS (live rows only, writes refused).
  * The real SQL is tested separately in supabase/tests; B3 runs the client against real PostgreSQL.
  */
@@ -22,6 +22,8 @@ export class FakeSyncServer {
   failNext: { pull?: Error; push?: Error } = {};
   /** Called before a push is applied (lets tests interleave another device mid-sync). */
   beforePush?: () => Promise<void> | void;
+  /** Called before each pull page is served (lets tests write between pages). */
+  beforePull?: (call: number) => Promise<void> | void;
   pushes = 0;
   pulls = 0;
 
@@ -35,7 +37,12 @@ export class FakeSyncServer {
 
   transport(uid: string): SyncTransport {
     return {
-      pull: async (since, head, limit) => { this.pulls++; if (this.failNext.pull) { const e = this.failNext.pull; delete this.failNext.pull; throw e; } return this.pull(uid, since, head, limit); },
+      pull: async (since, limit, full) => {
+        this.pulls++;
+        if (this.beforePull) await this.beforePull(this.pulls);
+        if (this.failNext.pull) { const e = this.failNext.pull; delete this.failNext.pull; throw e; }
+        return this.pull(uid, since, limit, full);
+      },
       push: async (changes) => {
         this.pushes++;
         if (this.beforePush) await this.beforePush();
@@ -45,17 +52,15 @@ export class FakeSyncServer {
     };
   }
 
-  pull(uid: string, since: number, head: number | null, limit: number): PullPage {
+  pull(uid: string, since: number, limit: number, full = false): PullPage {
     const u = this.user(uid);
-    if (since > 0 && since < u.floor) return { resync: true, head: u.head, floor: u.floor, changes: [], next_cursor: 0, more: false };
-    const h = head ?? u.head;
-    if (h > u.head || h < since) throw new Error('bad head');
+    if (!full && since > 0 && since < u.floor) return { resync: true, head: u.head, floor: u.floor, changes: [], next_cursor: 0, more: false };
     const lim = Math.min(Math.max(limit, 1), 500);
-    const stream = (['collections', 'saves'] as Table[]).flatMap(t => [...u.rows[t].values()].filter(r => r.rev > since && r.rev <= h).map(r => ({ table: t, row: { ...r } })));
+    const stream = (['collections', 'saves'] as Table[]).flatMap(t => [...u.rows[t].values()].filter(r => r.rev > since).map(r => ({ table: t, row: { ...r } })));
     stream.sort((a, b) => a.row.rev - b.row.rev);
     const page = stream.slice(0, lim);
-    const last = page.length ? page[page.length - 1].row.rev : h;
-    return { resync: false, head: h, floor: u.floor, changes: page, next_cursor: last, more: stream.length > lim };
+    const last = page.length ? page[page.length - 1].row.rev : Math.max(since, u.head);
+    return { resync: false, head: u.head, floor: u.floor, changes: page, next_cursor: last, more: stream.length > lim };
   }
 
   push(uid: string, changes: PushChange[]): PushResult[] {
@@ -65,7 +70,8 @@ export class FakeSyncServer {
     for (const ch of changes) {
       const cur = u.rows[ch.table].get(ch.id);
       if ((cur?.rev ?? 0) !== ch.base_rev) { out.push({ table: ch.table, id: ch.id, status: 'conflict', server: cur ? { ...cur } : null }); continue; }
-      if (ch.op === 'delete' && !cur) { out.push({ table: ch.table, id: ch.id, status: 'noop' }); continue; }
+      if (ch.op === 'delete' && (!cur || cur.deleted_at)) { out.push({ table: ch.table, id: ch.id, status: 'noop', server: cur ? { ...cur } : null }); continue; }
+      if ((ch.op === 'upsert' && cur?.deleted_at) || (ch.op === 'restore' && !cur?.deleted_at)) { out.push({ table: ch.table, id: ch.id, status: 'conflict', server: cur ? { ...cur } : null }); continue; }
       const rev = ++u.head;
       if (ch.op === 'delete' && ch.table === 'saves') {
         u.rows.saves.set(ch.id, { id: ch.id, rev, deleted_at: pgTime(new Date().toISOString()), url: '', title: '', note: null, type: cur!.type, source: null, image_url: null, tags: [], collection_id: null, is_favorite: false, created_at: cur!.created_at, updated_at: cur!.updated_at, last_rediscovered_at: null, details: null });

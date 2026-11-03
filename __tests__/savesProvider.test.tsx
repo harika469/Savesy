@@ -78,7 +78,7 @@ describe('S-03 first sign-in and the demo', () => {
     const realPull = mockServer.current.pull.bind(mockServer.current);
     let first = true;
     mockServer.current.pull = ((...a: Parameters<FakeSyncServer['pull']>) => { if (first) { first = false; return gate.then(() => realPull(...a)) as never; } return realPull(...a); }) as never;
-    mockServer.current.transport = ((uid: string) => ({ pull: (s: number, h: number | null, l: number) => Promise.resolve(mockServer.current.pull(uid, s, h, l)), push: async (c: never) => mockServer.current.push(uid, c) })) as never;
+    mockServer.current.transport = ((uid: string) => ({ pull: (s: number, l: number, f: boolean) => Promise.resolve(mockServer.current.pull(uid, s, l, f)), push: async (c: never) => mockServer.current.push(uid, c) })) as never;
     await setUser('user_A');                                     // first sync starts and waits on the gate
     await TestRenderer.act(async () => { ctx.addSave({ url: 'https://d.com', title: 'During first sync', type: 'other', tags: [] }); });
     release();

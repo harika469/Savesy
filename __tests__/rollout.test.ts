@@ -78,7 +78,7 @@ describe('the same phone after updating the app', () => {
     const before = JSON.stringify(phone.state);
     const { runSync } = jest.requireActual('@/utils/syncEngine') as typeof import('@/utils/syncEngine');
     await expect(runSync({ get: () => phone.state, apply: phone.apply, transport: {
-      pull: async () => { throw new Error('Could not find the function public.pull_changes(p_head, p_limit, p_since)'); },
+      pull: async () => { throw new Error('Could not find the function public.pull_changes(p_full, p_limit, p_since)'); },
       push: async () => { throw new Error('unreachable'); },
     } })).rejects.toThrow('pull_changes');
     expect(JSON.stringify(phone.state)).toBe(before);
