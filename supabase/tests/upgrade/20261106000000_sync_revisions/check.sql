@@ -82,5 +82,6 @@ select set_config('request.jwt.claims', '{"sub":"user_demo"}', false) \g /dev/nu
 select pg_temp.ok((select count(*) from public.saves) = 6, 'U15 an old client can still read its saves');
 select pg_temp.fails($$insert into public.saves (user_id, id, url, title) values ('user_demo', 'new', 'https://n', 'n') on conflict (user_id, id) do update set title = excluded.title$$, '42501', 'U16 an old client''s upsert is refused');
 select pg_temp.fails($$delete from public.saves where id = 'focus-playlist'$$, '42501', 'U17 an old client''s hard delete is refused');
+select pg_temp.ok(not exists (select 1 from public.collections where id = 'trips'), 'U18 an old client does not see the deleted collection as a blank item');
 reset role;
 select pg_temp.ok(exists (select 1 from public.saves where user_id = 'user_demo' and id = 'focus-playlist'), 'U17 nothing was erased by the refused delete');

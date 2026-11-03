@@ -53,8 +53,11 @@ create unique index collections_user_rev on public.collections (user_id, rev);
 -- 3) Read-only for clients; writes only through push_changes -----------------------------------------
 drop policy if exists "own saves" on public.saves;
 drop policy if exists "own collections" on public.collections;
-create policy "read own saves" on public.saves for select to authenticated using ((select auth.jwt() ->> 'sub') = user_id);
-create policy "read own collections" on public.collections for select to authenticated using ((select auth.jwt() ->> 'sub') = user_id);
+-- Direct reads see live rows only. Tombstones reach new clients through pull_changes (security definer);
+-- hiding them here stops older app builds, which read the tables directly and don't know deleted_at,
+-- from showing deleted saves as blank items.
+create policy "read own saves" on public.saves for select to authenticated using ((select auth.jwt() ->> 'sub') = user_id and deleted_at is null);
+create policy "read own collections" on public.collections for select to authenticated using ((select auth.jwt() ->> 'sub') = user_id and deleted_at is null);
 revoke insert, update, delete, truncate on public.saves, public.collections from anon, authenticated;
 revoke all on public.sync_heads from anon, authenticated;
 

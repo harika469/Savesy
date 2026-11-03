@@ -61,6 +61,15 @@ set role authenticated;
 select pg_temp.ok((pg_temp.push('uA', '[{"table":"saves","id":"s1","base_rev":3,"op":"upsert","row":{"url":"https://a.com","title":"resurrect?"}}]'))->0 #>> '{server,deleted_at}' is not null, 'P4 late edit gets a conflict carrying the tombstone');
 select pg_temp.ok((pg_temp.push('uA', '[{"table":"saves","id":"s1","base_rev":5,"op":"upsert","row":{"url":"https://a.com","title":"restored on purpose"}}]'))->0->>'status' = 'applied', 'P4b an edit made on top of the tombstone (base = its rev) restores the save deliberately');
 
+-- P4c tombstones are invisible to direct reads (older app builds) but delivered by pull_changes
+select set_config('request.jwt.claims', '{"sub":"uA"}', false) \g /dev/null
+select pg_temp.ok((pg_temp.push('uA', '[{"table":"saves","id":"gone","base_rev":0,"op":"upsert","row":{"url":"https://g","title":"gone"}}]'))->0->>'status' = 'applied', 'P4c setup');
+select set_config('test.gone', (pg_temp.pull('uA', 0))->>'head', false) \g /dev/null
+select pg_temp.ok((pg_temp.push('uA', format('[{"table":"saves","id":"gone","base_rev":%s,"op":"delete"}]', current_setting('test.gone'))))->0->>'status' = 'applied', 'P4c deleted');
+select set_config('request.jwt.claims', '{"sub":"uA"}', false) \g /dev/null
+select pg_temp.ok(not exists (select 1 from public.saves where id = 'gone'), 'P4c a direct read (older app) does not see the tombstone');
+select pg_temp.ok((pg_temp.pull('uA', current_setting('test.gone')::bigint))->'changes' @> '[{"table":"saves","row":{"id":"gone"}}]'::jsonb, 'P4c pull_changes delivers the tombstone');
+
 -- P9 delete of an id the server never had
 select set_config('test.h', pg_temp.head('uA')::text, false) \g /dev/null
 select pg_temp.ok((pg_temp.push('uA', '[{"table":"saves","id":"never","base_rev":0,"op":"delete"}]'))->0->>'status' = 'noop' and pg_temp.head('uA') = current_setting('test.h')::bigint, 'P9 unknown delete is a no-op and uses no revision');
