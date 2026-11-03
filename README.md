@@ -52,12 +52,15 @@ Clerk handles sign-in; Supabase stores the saves. Supabase trusts Clerk's sessio
 
 Login works in Expo Go. On first launch Savesy offers sign-in once; closing it keeps you in guest mode. Your stash (smiley on Home) has the account, sign-out and sync status.
 
-How it behaves (`components/Account.tsx`, `lib/cloudSync.ts`, `utils/sync.ts`):
-- Ids are made on the phone, so saving works offline. Every change stamps `updatedAt`; when the phone and cloud disagree, the newer copy wins. Deletions are remembered until the cloud confirms them.
-- First sign-in: guest saves are added to the account. If you never touched the demo content and the account already has saves, the demo is dropped instead of being uploaded.
-- Signing in as a different account on the same phone clears the previous account's data first, so accounts never mix.
-- Sign out syncs first, warns if anything couldn't be uploaded, then clears the phone. Your saves stay in your account.
-- Clerk only (no Supabase settings): you can sign in, but saves stay on the phone.
+> **Beta: cloud sync is switched off** unless the build sets `EXPO_PUBLIC_CLOUD_SYNC_ENABLED=true`. Off is the local-only beta (everything works on the phone; nothing syncs). Turn it on only after following [`docs/release/sync-rollout.md`](docs/release/sync-rollout.md).
+
+How sync behaves (`utils/syncEngine.ts`, `context/SavesContext.tsx`, server: `supabase/migrations/20261106000000_sync_revisions.sql`):
+- The server numbers every change. A phone's change applies only if it was based on the latest version; otherwise the phone gets the server's copy and merges. Phone clocks don't decide anything.
+- Nothing unsynced is ever silently discarded. If the same field was changed here and on another device, or something was deleted there but edited here, **your version is kept on the phone and the item is marked "changed on another device"** until you choose *Keep mine* or *Use theirs*. Conflicted items don't sync until then.
+- Deletions sync to every device. After a full re-download, items the server no longer has are removed, not re-uploaded.
+- "Synced" only shows once the server has acknowledged every change. Otherwise the stash screen says *Waiting to sync*, *Needs your attention* or *Couldn't sync*, with a count.
+- Each account (and guest use) has its own library on the phone. Signing out or switching accounts never erases anything; unsynced changes wait for that account to sign in again. Saves made as a guest join the account at the next sign-in; the untouched demo never does.
+- Clerk only (no Supabase settings, or sync off): you can sign in, but saves stay on the phone.
 
 ## Smart Saves and Pro
 
@@ -120,7 +123,8 @@ Data is stored on-device with AsyncStorage under `@savesy/v1`. Clearing Expo Go'
 - `components/SaveForm.tsx` — the shared add/edit form
 - `components/ShareIntentHandler.tsx` + `app/+native-intent.tsx` — receive shares from other apps
 - `utils/` — link metadata and URL helpers, search, share parsing, backup/restore, and dates
-- `lib/` — Supabase client (sends the Clerk token) and cloud sync
+- `lib/` — Supabase client (sends the Clerk token) and the sync transport
+- `utils/syncEngine.ts` — the sync client: merges, conflicts, push/pull rounds (tested against `test-support/fakeSyncServer.ts`)
 - `components/Account.tsx`, `app/sign-in.tsx` — Clerk provider and the email-code sign-in screen
 - `supabase/migrations/` — database schema, row-level security, plan allowances
 - `supabase/functions/` — the Smart Saves edge function and its shared logic
