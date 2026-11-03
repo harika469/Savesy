@@ -20,8 +20,9 @@ create temp view definer_exec as
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace, pg_roles r
   where n.nspname = 'public' and p.prosecdef and r.rolname in ('anon', 'authenticated') and has_function_privilege(r.rolname, p.oid, 'execute');
 select pg_temp.ok(not exists (select 1 from definer_exec where rolname = 'anon'), 'audit: anon can execute no SECURITY DEFINER function in public');
-select pg_temp.ok((select coalesce(array_agg(fn order by fn), '{}') from definer_exec where rolname = 'authenticated') = array['consume_ai_credit()', 'get_plan()'],
-                  'audit: authenticated can execute exactly consume_ai_credit() and get_plan()');
+select pg_temp.ok((select coalesce(array_agg(fn order by fn), '{}') from definer_exec where rolname = 'authenticated')
+                  = array['consume_ai_credit()', 'get_plan()', 'pull_changes(bigint,bigint,integer)', 'push_changes(jsonb)'],
+                  'audit: authenticated can execute exactly consume_ai_credit(), get_plan(), pull_changes(), push_changes()');
 
 -- Behaviour: the attack from the review now fails; the normal path still works
 set role authenticated; set request.jwt.claims = '{"sub":"user_X"}';
