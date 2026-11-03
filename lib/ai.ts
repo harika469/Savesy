@@ -3,10 +3,16 @@ import { normalizeSmartResult } from '@/supabase/functions/_shared/enrich';
 import { cloudConfigured, getSupabase } from './supabase';
 
 export type { PlanInfo, SmartResult };
-export const smartSavesAvailable = cloudConfigured;
+/**
+ * Smart Saves are OFF in builds unless EXPO_PUBLIC_SMART_SAVES_ENABLED=true. This only hides the UI;
+ * the edge function enforces its own server-side flag (SMART_SAVES_ENABLED), so an old or modified
+ * app still can't spend credits or reach Claude while it's off.
+ */
+export function smartSavesFlag(value: string | undefined): boolean { return value === 'true'; }
+export const smartSavesAvailable = cloudConfigured && smartSavesFlag(process.env.EXPO_PUBLIC_SMART_SAVES_ENABLED);
 
 export class SmartSaveError extends Error {
-  constructor(message: string, readonly reason: 'limit' | 'unauthorized' | 'bad_request' | 'failed' | 'offline', readonly plan?: PlanInfo) { super(message); }
+  constructor(message: string, readonly reason: 'disabled' | 'limit' | 'unauthorized' | 'bad_request' | 'failed' | 'offline', readonly plan?: PlanInfo) { super(message); }
 }
 
 /** Asks the server to read the link and organize it. Uses one Smart Save from the monthly allowance. */
