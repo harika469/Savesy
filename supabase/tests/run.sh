@@ -19,7 +19,7 @@ migrate() { # migrate DB [only-before NAME | from NAME]
     local base; base="$(basename "$m" .sql)"
     if [ "$mode" = before ] && [[ ! "$base" < "$name" ]]; then continue; fi
     if [ "$mode" = from ] && [[ "$base" < "$name" ]]; then continue; fi
-    psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$m" >/dev/null 2>&1 || { echo "not ok - migration $m failed" >&2; psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$m" >/dev/null; exit 1; }
+    local log; log="$(psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$m" 2>&1 >/dev/null)" || { echo "not ok - migration $m failed:" >&2; echo "$log" | grep -v NOTICE >&2; exit 1; }
   done
 }
 run_sql() { psql -X -q -v ON_ERROR_STOP=1 -d "$1" -f "$2" | sed '/^$/d'; }
