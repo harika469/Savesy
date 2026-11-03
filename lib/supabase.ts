@@ -8,8 +8,13 @@ export const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
 
 /** Clerk login is on when its key is in the build. */
 export const authConfigured = !!clerkPublishableKey;
-/** Cloud sync needs both a Supabase project and Clerk accounts to own the rows. */
-export const cloudConfigured = !!url && !!key && authConfigured;
+/**
+ * Cloud sync is OFF unless EXPO_PUBLIC_CLOUD_SYNC_ENABLED is exactly "true" (and Supabase + Clerk are configured).
+ * Off = the local-only beta: saving, collections, search, sharing and backups work on the phone; nothing syncs.
+ * Turn it on only after the B1 migration is live and the B2/B3 checks pass (issue #1).
+ */
+export const cloudSyncFlag = (value: string | undefined) => value === 'true';
+export const cloudConfigured = !!url && !!key && authConfigured && cloudSyncFlag(process.env.EXPO_PUBLIC_CLOUD_SYNC_ENABLED);
 
 type TokenGetter = () => Promise<string | null>;
 let getAccessToken: TokenGetter | null = null;
