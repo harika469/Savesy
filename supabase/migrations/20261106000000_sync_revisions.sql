@@ -177,10 +177,14 @@ end $$;
 -- a prefix. A row not yet delivered has rev > cursor; if it changes while a device is paging, its rev grows and it
 -- is delivered later at its newest version. A row already delivered that changes again is delivered again. When a
 -- call returns more = false, every row that existed at that moment has been delivered at its latest version.
--- If p_since is below the user's floor (tombstones purged), the response says resync = true: re-download from 0.
+-- Floors: tombstones at or below a user's floor may have been purged. An INCREMENTAL pull (p_full = false) whose cursor
+-- is below the floor might have missed a deletion, so it gets resync = true on every such page: re-download from 0.
+-- A FULL download (p_full = true, from p_since = 0 until more = false) skips that check on every page: the device is
+-- rebuilding from scratch and treats anything it didn't receive as gone, so a deletion purged mid-download is still
+-- applied (the row is simply absent).
 -- STABLE: the floor, head and rows of one call come from one snapshot, so a concurrent purge is either fully
 -- visible (resync) or not at all.
-create function public.pull_changes(p_since bigint, p_limit integer default 500) returns jsonb
+create function public.pull_changes(p_since bigint, p_limit integer default 500, p_full boolean default false) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare
   uid text := auth.jwt() ->> 'sub';
@@ -189,7 +193,7 @@ begin
   if uid is null then raise exception 'not signed in' using errcode = '28000'; end if;
   if p_since is null or p_since < 0 then raise exception 'p_since must be >= 0' using errcode = '22023'; end if;
   select coalesce(max(h.rev), 0), coalesce(max(h.floor_rev), 0) into cur_head, cur_floor from public.sync_heads h where h.user_id = uid;
-  if p_since > 0 and p_since < cur_floor then
+  if not coalesce(p_full, false) and p_since > 0 and p_since < cur_floor then
     return jsonb_build_object('resync', true, 'head', cur_head, 'floor', cur_floor, 'changes', '[]'::jsonb, 'next_cursor', 0, 'more', false);
   end if;
   lim := least(greatest(coalesce(p_limit, 500), 1), 500);
@@ -239,9 +243,9 @@ begin
 end $$;
 
 -- 8) Grants (explicit; migration 20261105000001 means nothing is client-callable by default) -------------
-revoke all on function public.sync_validate_change(jsonb), public.push_changes(jsonb), public.pull_changes(bigint, integer),
+revoke all on function public.sync_validate_change(jsonb), public.push_changes(jsonb), public.pull_changes(bigint, integer, boolean),
   public.purge_tombstones(interval) from public, anon, authenticated;
-grant execute on function public.push_changes(jsonb), public.pull_changes(bigint, integer) to authenticated;
+grant execute on function public.push_changes(jsonb), public.pull_changes(bigint, integer, boolean) to authenticated;
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.purge_tombstones(interval) to service_role;
@@ -249,7 +253,7 @@ do $$ begin
 end $$;
 
 -- Rollback (only before any client has written through push_changes; afterwards tombstones would be lost):
---   drop function public.purge_tombstones(interval), public.pull_changes(bigint, integer),
+--   drop function public.purge_tombstones(interval), public.pull_changes(bigint, integer, boolean),
 --     public.push_changes(jsonb), public.sync_validate_change(jsonb);
 --   drop policy "read own saves" on public.saves; drop policy "read own collections" on public.collections;
 --   (recreate the "own saves"/"own collections" policies from 20261103000000 and re-grant insert/update/delete)

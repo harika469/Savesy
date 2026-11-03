@@ -6,20 +6,20 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', u)::text, false);
   return public.push_changes(changes::jsonb);
 end $$;
-create function pg_temp.pull(u text, since bigint, lim integer default 500) returns jsonb language plpgsql as $$
+create function pg_temp.pull(u text, since bigint, lim integer default 500, full_ boolean default false) returns jsonb language plpgsql as $$
 begin
   perform set_config('request.jwt.claims', json_build_object('sub', u)::text, false);
-  return public.pull_changes(since, lim);
+  return public.pull_changes(since, lim, full_);
 end $$;
 create function pg_temp.head(u text) returns bigint language plpgsql as $$
 begin return (pg_temp.pull(u, 0, 1))->>'head'; end $$;
 create function pg_temp.ids(page jsonb) returns text language sql as $$
   select coalesce(string_agg(c->'row'->>'id', ',' order by (c->'row'->>'rev')::bigint), '') from jsonb_array_elements(page->'changes') c $$;
-grant execute on function pg_temp.push(text, text), pg_temp.pull(text, bigint, integer), pg_temp.head(text), pg_temp.ids(jsonb) to public;
+grant execute on function pg_temp.push(text, text), pg_temp.pull(text, bigint, integer, boolean), pg_temp.head(text), pg_temp.ids(jsonb) to public;
 
 -- Grants
-select pg_temp.ok(has_function_privilege('authenticated', 'public.push_changes(jsonb)', 'execute') and has_function_privilege('authenticated', 'public.pull_changes(bigint,integer)', 'execute'), 'G1 authenticated can push and pull');
-select pg_temp.ok(not has_function_privilege('anon', 'public.push_changes(jsonb)', 'execute') and not has_function_privilege('anon', 'public.pull_changes(bigint,integer)', 'execute'), 'G2 anon cannot push or pull');
+select pg_temp.ok(has_function_privilege('authenticated', 'public.push_changes(jsonb)', 'execute') and has_function_privilege('authenticated', 'public.pull_changes(bigint,integer,boolean)', 'execute'), 'G1 authenticated can push and pull');
+select pg_temp.ok(not has_function_privilege('anon', 'public.push_changes(jsonb)', 'execute') and not has_function_privilege('anon', 'public.pull_changes(bigint,integer,boolean)', 'execute'), 'G2 anon cannot push or pull');
 select pg_temp.ok(not has_function_privilege('authenticated', 'public.purge_tombstones(interval)', 'execute') and has_function_privilege('service_role', 'public.purge_tombstones(interval)', 'execute'), 'G3 purge is server-only');
 select pg_temp.ok(not has_table_privilege('authenticated', 'public.saves', 'insert') and not has_table_privilege('authenticated', 'public.saves', 'update')
                   and not has_table_privilege('authenticated', 'public.saves', 'delete') and not has_table_privilege('authenticated', 'public.collections', 'delete'), 'G4 clients cannot write the tables directly');
@@ -183,4 +183,22 @@ set role service_role; select public.purge_tombstones('90 days') \g /dev/null
 reset role; set role authenticated;
 select pg_temp.ok(current_setting('test.p1') = '1' and (pg_temp.pull('uQ', current_setting('test.p1')::bigint, 1))->>'resync' = 'true',
                   'R2 the device''s next page (cursor 1 < floor 4) is told to resync, so it cannot miss the purged deletion');
+-- R3: a FULL download from 0 must page past the floor (found by the B2 engine test: without p_full a re-download
+-- could never get beyond page 1 after any purge)
+select set_config('test.c', '0', false) \g /dev/null
+do $$
+declare page jsonb; pages int := 0; got text := '';
+begin
+  loop
+    page := pg_temp.pull('uQ', current_setting('test.c')::bigint, 1, true);
+    if (page->>'resync')::boolean then raise exception 'full download was told to resync on page %', pages + 1; end if;
+    got := got || coalesce((select string_agg(c->'row'->>'id', ',') from jsonb_array_elements(page->'changes') c), '') || ';';
+    perform set_config('test.c', page->>'next_cursor', false); pages := pages + 1;
+    exit when (page->>'more')::boolean = false;
+    if pages > 10 then raise exception 'did not finish'; end if;
+  end loop;
+  perform set_config('test.got', got, false);
+end $$;
+select pg_temp.ok(current_setting('test.got') = 'r1;r2;', 'R3 a full download pages past the floor (pages: r1, r2) and the purged r3 is simply absent');
+select pg_temp.ok((pg_temp.pull('uQ', 1, 1, false))->>'resync' = 'true', 'R3 the same cursor in an incremental pull is still told to resync');
 reset role;
