@@ -108,3 +108,24 @@ The caller-scoped RPC at `supabase/functions/enrich-save/index.ts:105-109` **is*
 3. SEC-03, SEC-02.
 4. C-6 (including `ai_charges` results and tombstones), C-10.
 5. SEC-04, C-9, MOB-01 and the two-device staging runs before each release.
+
+---
+
+## Part 3: v2 prototypes after ChatGPT's review of `3fcf7fd`
+
+ChatGPT's follow-up on issue #1 raised ten points. Each was checked against the v1 SQL; v2 fixes them, and `prototypes/run_all.sh` now **asserts** every result (92 checks; exits non-zero on any failure).
+
+| ChatGPT point | Verdict on v1 | v2 change | Test |
+|---|---|---|---|
+| Sync: no validation of `op` / `base_rev` / batch / row fields | **Confirmed.** `op: "deleet"` was applied as an upsert; omitted `base_rev` became 0; no batch limit. `user_id` / `rev` / `deleted_at` inside `row` were already ignored (ownership can't be injected). | `sync_validate_change` checks the whole batch **before any write**: allowed keys, `op` ∈ {upsert, delete}, integer `base_rev` ≥ 0, id length, per-table row allowlist, row size, 1–200 changes. | V1–V12 (V12: one bad change rejects the batch and nothing is written) |
+| Sync: unknown delete bumps the head and returns `rev: null` | **Confirmed** (head 2 → 3). | Returns `noop`; no revision used. | P9 |
+| Sync: P7 is weak evidence | **Confirmed.** With `base_rev 0`, another user legitimately gets its own row with the same id. | P7 now asserts per-user ids, that each user sees only their own rows and head, and that the other user's row is untouched. | P7 |
+| Sync: consistent cursor across tables | **Gap in v1** (no defined high-water mark). | `get_sync_head()`; pull = page each table with `rev ∈ (cursor, head]` ordered by `rev`. Per-user write serialization means every rev ≤ head is committed. | P11: concurrent writes during paging land in the next round; nothing is lost or seen twice |
+| Sync: collection delete and dependent saves | **Confirmed gap** (saves kept pointing at a deleted collection). | A collection delete detaches its live saves, each with a new revision. A save pointing at a deleted collection is stored without it, and the stored row is returned. | P10 |
+| Sync: payload scrubbing | Raised by me in v1, **fixed** in v2. | Save tombstones keep only identity, `rev` and `deleted_at`. | P4 |
+| Sync: safe client rebase | **Accepted.** | `40_client_rebase.mjs`: three-way merge; delete wins; different fields merge; the same field changed on both sides keeps the server value and is reported; tags merge as sets. | 8 node tests |
+| Credits: late success after the lease expired | **Confirmed.** The edge function's Claude client uses SDK defaults (`supabase/functions/enrich-save/index.ts:17`: 10-minute timeout, 2 retries), so "far above the run time" relied on the platform killing the function. | Explicit `expires_at` lease; `finalize_ai_charge` returns `finalized` / `already_finalized` / `recharged` / `uncharged` / `not_found`. **Edge requirement:** set an explicit Claude timeout and retry count so the worst case stays well under the lease, and handle every finalize status (never report a charge state that didn't happen). | T7, T12, T13 |
+| Credits: same request id with a changed payload | **Confirmed gap.** | `request_hash` (sha256 of the normalized request, computed by the edge function); reusing an id for different input → `22023`. | T11 |
+| Harness: errors don't fail the run; destructive `dropdb` | **Confirmed.** | `set -euo pipefail`, `ON_ERROR_STOP=1`, assertion helpers with exact SQLSTATEs, polling instead of fixed sleeps, `wait` on background sessions, unique disposable database dropped on exit. During the rewrite, the stricter runner caught a bug in my own test: V12's "nothing written" check had been reading a table hidden by RLS. | the whole suite |
+
+**Still required before production** (unchanged): verify C-1 on the real Supabase project; staging tests for Clerk tokens (SEC-04); keep Smart Saves off until the reserve/finalize/refund flow passes staging; tombstone and cached-result retention; and the old-client cutover plan.

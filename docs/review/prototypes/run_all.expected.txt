@@ -1,225 +1,103 @@
-##### 10 C-1 exposure at e31bff1
---- who can execute refund_ai_credit:
-    rolname    | has_function_privilege 
----------------+------------------------
- authenticated | t
- anon          | t
- service_role  | t
-(3 rows)
-
---- attacker (signed-in user_X) burns 10 credits, then refunds themselves:
- allowed_of_10 
----------------
-            10
-(1 row)
-
- eleventh_allowed 
-------------------
- false
-(1 row)
-
- refund_ai_credit 
-------------------
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
-(10 rows)
-
- allowed_after_self_refund |                 get_plan                 
----------------------------+------------------------------------------
- true                      | {"plan": "free", "used": 0, "limit": 10}
-(1 row)
-
---- anon can also call it for any user id:
- refund_ai_credit 
-------------------
- 
-(1 row)
-
-##### 20 credits prototype applied
-##### 21 credit tests
-== T1 grants: who can execute what
-                     f                      |       r       | has_function_privilege 
---------------------------------------------+---------------+------------------------
- public.finalize_ai_charge(text,uuid,jsonb) | anon          | f
- public.finalize_ai_charge(text,uuid,jsonb) | authenticated | f
- public.finalize_ai_charge(text,uuid,jsonb) | service_role  | t
- public.refund_ai_charge(text,uuid)         | anon          | f
- public.refund_ai_charge(text,uuid)         | authenticated | f
- public.refund_ai_charge(text,uuid)         | service_role  | t
- public.refund_ai_credit(text)              | anon          | f
- public.refund_ai_credit(text)              | authenticated | f
- public.refund_ai_credit(text)              | service_role  | t
- public.reserve_ai_credit(uuid)             | anon          | f
- public.reserve_ai_credit(uuid)             | authenticated | t
- public.reserve_ai_credit(uuid)             | service_role  | t
-(12 rows)
-
-== T2 anon / no sub cannot reserve
-psql:docs/review/prototypes/21_credits_tests.sql:7: ERROR:  permission denied for function reserve_ai_credit
-== T3 same request id twice = one charge
- first | second_replay | used 
--------+---------------+------
- true  | reserved      | 0
-(1 row)
-
-== T4 client cannot finalize, refund, or read charges
-psql:docs/review/prototypes/21_credits_tests.sql:12: ERROR:  permission denied for function finalize_ai_charge
-psql:docs/review/prototypes/21_credits_tests.sql:13: ERROR:  permission denied for function refund_ai_charge
- visible_charges 
------------------
-               0
-(1 row)
-
-== T5 refund exactly once (server)
- first_refund | second_refund 
---------------+---------------
- t            | 
-(1 row)
-
- used 
-------
-    0
-(1 row)
-
-== T6 retry with a refunded id does not charge again
-  replay  | used 
-----------+------
- refunded | 0
-(1 row)
-
-== T7 succeeded id replays the cached result for free; finalize only once
- ?column? 
-----------
- true
-(1 row)
-
- f1 | f2 | refund_after_success 
-----+----+----------------------
- t  |    | 
-(1 row)
-
- cached_title | used 
---------------+------
- Pad Thai     | 1
-(1 row)
-
-== T8 month rollover: charge in Oct, refund in Nov decrements Oct
- refund_ai_charge 
-------------------
- t
-(1 row)
-
-   month    | used 
-------------+------
- 2026-10-01 |    3
-(1 row)
-
-== T9 stale reservation (crash) is refunded once by the next reserve
- allowed_after_cleanup | used 
------------------------+------
- true                  | 10
-(1 row)
-
-              request_id              |  status  
---------------------------------------+----------
- 44444444-4444-4444-4444-444444444444 | refunded
- 55555555-5555-5555-5555-555555555555 | reserved
-(2 rows)
-
-== T10 cap still enforced: 10 different ids then the 11th refused
- allowed 
----------
-      10
-(1 row)
-
-##### 22 R1 same id, concurrent
-A:{"plan": "free", "used": 1, "limit": 10, "allowed": true, "user_id": "r1"}
-
-B:{"replay": "reserved", "result": null, "allowed": false}
-r1 charges|1
-r1 used|1
-##### 23 R2 at 9/10, two ids concurrent
-X:true
-
-Y:false
-r2 used|10
-r2 charges|1
-##### 30 sync prototype applied
-##### 31 sync tests
-== P1 new save (base 0) applies at rev 1
-                          push_changes                           
------------------------------------------------------------------
- [{"id": "s1", "rev": 1, "table": "saves", "status": "applied"}]
-(1 row)
-
-== P2 phone A edits from rev 1 -> applied (rev 2); phone B still at rev 1 -> CONFLICT, server row returned, no overwrite
-    a    
----------
- applied
-(1 row)
-
- b_status_even_with_future_clock 
----------------------------------
- conflict
-(1 row)
-
-    title    | rev 
--------------+-----
- edited on A |   2
-(1 row)
-
-== P3 B rebases onto rev 2 (its changed fields on top of the server row) -> applied
- ?column? 
-----------
- applied
-(1 row)
-
-== P4 delete (C-2): A deletes at rev 3; B edits from rev 3 too late -> conflict with tombstone
- a_delete 
-----------
- applied
-(1 row)
-
- b_sees_tombstone 
-------------------
- t
-(1 row)
-
-== P5 a fresh device pulls everything since rev 0 and learns the deletion (incremental, ordered, pageable)
- id |     title      | rev | deleted 
-----+----------------+-----+---------
- s1 | B after rebase |   4 | t
-(1 row)
-
-== P6 direct client writes are refused (only push_changes writes)
-psql:docs/review/prototypes/31_sync_tests.sql:17: ERROR:  new row violates row-level security policy for table "saves"
-     title      
-----------------
- B after rebase
-(1 row)
-
-== P7 another user cannot touch uA rows
- ub_result 
------------
- conflict
-(1 row)
-
- user_id | id |     title      | rev 
----------+----+----------------+-----
- uA      | s1 | B after rebase |   4
-(1 row)
-
-##### 32 P8 concurrent push of the same row
-1
-A:applied
-
-B:conflict
-final|from A|2
+## 10_c1_refund_exposure.sql
+ ok - C-1: authenticated can execute refund_ai_credit at e31bff1
+ ok - C-1: anon can execute refund_ai_credit at e31bff1
+ ok - C-1: 10 free credits used
+ ok - C-1: 11th refused
+ ok - C-1: after refunding themselves, the user can spend again
+ ok - C-1: anon called refund_ai_credit for another user without error
+## 20_credits_prototype.sql applied
+## 21_credits_tests.sql
+ ok - T1 old refund_ai_credit: no longer callable by anon/authenticated
+ ok - T1 reserve: authenticated only
+ ok - T1 finalize/refund: service_role only
+ ok - T2 anon cannot reserve (SQLSTATE 42501)
+ ok - T3 first reserve allowed
+ ok - T3 second reserve is a replay
+ ok - T3 one charge
+ ok - T11 reusing an id for a different request is rejected (SQLSTATE 22023)
+ ok - T11 malformed hash rejected (SQLSTATE 22023)
+ ok - T4 client cannot finalize (SQLSTATE 42501)
+ ok - T4 client cannot refund (SQLSTATE 42501)
+ ok - T4 client sees no charges
+ ok - T5 first refund
+ ok - T5 second refund does nothing
+ ok - T5 usage back to 0
+ ok - T6 refunded id replays as refunded
+ ok - T6 not charged again
+ ok - T7 reserve
+ ok - T7 finalize
+ ok - T7 second finalize is a no-op
+ ok - T7 refund after success does nothing
+ ok - T7 finalize of an unknown id reports not_found
+ ok - T7 retry returns the cached result
+ ok - T7 usage stays 1
+ ok - T8 refund
+ ok - T8 recorded (previous) month decremented 4 -> 3
+ ok - T9 expired lease freed a credit
+ ok - T9 old lease refunded once, new request charged
+ ok - T13 late success with no credit left -> uncharged (result kept, cost absorbed)
+ ok - T13 usage unchanged, charged = false
+ ok - T12 late success with credit left -> recharged
+ ok - T12 one credit taken, status succeeded
+ ok - T10 10 allowed, 11th refused
+## race 22_race_same_id_A.sql + 22_race_same_id_B.sql
+ ok - R1 concurrent same-id reserve is a replay
+## race 23_race_cap_A.sql + 23_race_cap_B.sql
+ ok - R2 concurrent second request refused at the cap
+## 24_race_checks.sql
+ ok - R1 exactly one charge, used = 1
+ ok - R2 exactly one charge, used = 10
+## 30_sync_prototype.sql applied
+## 31_sync_tests.sql
+ ok - V1 unknown op rejected (SQLSTATE 22023)
+ ok - V2 missing base_rev rejected (SQLSTATE 22023)
+ ok - V3 negative base_rev rejected (SQLSTATE 22023)
+ ok - V4 unknown change key rejected (SQLSTATE 22023)
+ ok - V5 user_id inside row rejected (SQLSTATE 22023)
+ ok - V6 rev inside row rejected (SQLSTATE 22023)
+ ok - V7 delete with a row rejected (SQLSTATE 22023)
+ ok - V8 unknown table rejected (SQLSTATE 22023)
+ ok - V9 empty batch rejected (SQLSTATE 22023)
+ ok - V10 batch over 200 rejected (SQLSTATE 22023)
+ ok - V11 non-array rejected (SQLSTATE 22023)
+ ok - V12 one bad change rejects the batch (SQLSTATE 22023)
+ ok - V12 nothing from the rejected batch was written
+ ok - P1 new save applied at rev 1
+ ok - P2 phone A edit applied
+ ok - P2 stale push conflicts even with a future clock
+ ok - P2 server row not overwritten
+ ok - P3 rebased push applied
+ ok - P4 delete applied
+ ok - P4 tombstone content scrubbed
+ ok - P4 late edit gets a conflict carrying the tombstone
+ ok - P9 unknown delete is a no-op and the head stays at 4
+ ok - P6 direct insert refused by RLS (SQLSTATE 42501)
+ ok - P6 direct update changes nothing
+ ok - P7 uB creates s2
+ ok - P7 uA creates its own s2 (ids are per user)
+ ok - P7 uB pushing with uA's revision number only conflicts against uB's own row
+ ok - P7 uB sees only its own row and its own head
+ ok - P7 uA's s2 untouched by uB
+ ok - P10 setup
+ ok - P10 collection deleted
+ ok - P10 both saves detached with revisions after the delete
+ ok - P10 head = 6 (3 writes + delete + 2 detaches)
+ ok - P10 a save pointing at a deleted collection is stored without it, and the client is told
+ ok - P11 five saves
+ ok - P11 concurrent writes land after the head
+ ok - P11 round 1: pages p2,p3 then p4,p5 at stable boundaries; nothing written after the head appears
+ ok - P11 round 2: the edited p1 and the late collection arrive in the next round
+ ok - P12 anon cannot push (SQLSTATE 42501)
+## race 32_race_push_A.sql + 32_race_push_B.sql
+ ok - P8 concurrent push from the same rev conflicts
+ ok - P8 final row is A's write
+ok - different fields edited on two devices are both kept
+ok - same field edited on both: server value kept, conflict reported
+ok - identical edits on both sides are not a conflict
+ok - tags merge as sets: local removed "food" and added "cheap", server added "lunch"
+ok - server tombstone wins over a local edit (no resurrection)
+ok - local delete wins over a server edit and is resubmitted at the server revision
+ok - server-side detach (collection deleted) is adopted when the client did not touch the field
+ok - moving into a collection that was concurrently detached keeps the server value and reports it
+ALL PASSED
+ALL PASSED

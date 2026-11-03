@@ -1,11 +1,14 @@
--- C-1 at e31bff1: refund_ai_credit is callable by anon/authenticated. Run after 00.
-\echo '--- who can execute refund_ai_credit:'
-select r.rolname, has_function_privilege(r.rolname, 'public.refund_ai_credit(text)', 'execute') from pg_roles r where r.rolname in ('anon','authenticated','service_role');
-\echo '--- attacker (signed-in user_X) burns 10 credits, then refunds themselves:'
+-- C-1 at e31bff1 (before 20 is applied): refund_ai_credit is callable by anon/authenticated. Run after 00.
+\i docs/review/prototypes/05_assert.sql
+\pset tuples_only on
+select pg_temp.ok(has_function_privilege('authenticated', 'public.refund_ai_credit(text)', 'execute'), 'C-1: authenticated can execute refund_ai_credit at e31bff1');
+select pg_temp.ok(has_function_privilege('anon', 'public.refund_ai_credit(text)', 'execute'), 'C-1: anon can execute refund_ai_credit at e31bff1');
 set role authenticated; set request.jwt.claims = '{"sub":"user_X"}';
-select count(*) filter (where (consume_ai_credit())->>'allowed' = 'true') as allowed_of_10 from generate_series(1,10);
-select (consume_ai_credit())->>'allowed' as eleventh_allowed;
-select refund_ai_credit('user_X') from generate_series(1,10);
-select (consume_ai_credit())->>'allowed' as allowed_after_self_refund, get_plan();
-\echo '--- anon can also call it for any user id:'
-reset role; set role anon; select refund_ai_credit('user_someone_else'); reset role;
+select pg_temp.ok((select count(*) from generate_series(1,10) where (public.consume_ai_credit())->>'allowed' = 'true') = 10, 'C-1: 10 free credits used');
+select pg_temp.ok((public.consume_ai_credit())->>'allowed' = 'false', 'C-1: 11th refused');
+select public.refund_ai_credit('user_X') from generate_series(1,10) \g /dev/null
+select pg_temp.ok((public.consume_ai_credit())->>'allowed' = 'true', 'C-1: after refunding themselves, the user can spend again');
+reset role; set role anon; set request.jwt.claims = '{}';
+select public.refund_ai_credit('user_someone_else') \g /dev/null
+select 'ok - C-1: anon called refund_ai_credit for another user without error';
+reset role;
