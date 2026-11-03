@@ -101,7 +101,7 @@ end $$;
 create function public.push_changes(p_changes jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = '' as $$
 declare
-  uid text := auth.jwt() ->> 'sub';
+  uid text := nullif(auth.jwt() ->> 'sub', '');   -- an empty subject is no user
   ch jsonb; tbl text; cid text; base bigint; cur_rev bigint; cur_deleted boolean; next_rev bigint; out jsonb := '[]'::jsonb; srv jsonb; col_ok boolean; s record; op text;
 begin
   if uid is null then raise exception 'not signed in' using errcode = '28000'; end if;
@@ -187,7 +187,7 @@ end $$;
 create function public.pull_changes(p_since bigint, p_limit integer default 500, p_full boolean default false) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare
-  uid text := auth.jwt() ->> 'sub';
+  uid text := nullif(auth.jwt() ->> 'sub', '');   -- an empty subject is no user
   cur_head bigint; cur_floor bigint; lim integer; page jsonb; last_rev bigint; more boolean;
 begin
   if uid is null then raise exception 'not signed in' using errcode = '28000'; end if;
@@ -208,6 +208,10 @@ begin
   last_rev := coalesce(last_rev, greatest(p_since, cur_head));
   more := exists (select 1 from public.collections where user_id = uid and rev > last_rev)
        or exists (select 1 from public.saves where user_id = uid and rev > last_rev);
+  -- On the last page, move the cursor to the head: no row lies between last_rev and the head in this snapshot.
+  -- Without this, a device whose newest delivered row is older than a purged tombstone ends with cursor < floor
+  -- and is told to re-download on every later sync (found by the B3 end-to-end tests).
+  if not more then last_rev := greatest(last_rev, cur_head); end if;
   return jsonb_build_object('resync', false, 'head', cur_head, 'floor', cur_floor, 'changes', page, 'next_cursor', last_rev, 'more', more);
 end $$;
 

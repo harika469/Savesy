@@ -26,6 +26,12 @@ select pg_temp.ok(not has_table_privilege('authenticated', 'public.saves', 'inse
 
 set role authenticated;
 
+-- A0: a request without a user (no subject, or an empty one) is refused before anything is read or written
+select pg_temp.fails($$select pg_temp.pull('', 0)$$, '28000', 'A0 an empty subject cannot pull');
+select pg_temp.fails($$select pg_temp.push('', '[{"table":"saves","id":"k","base_rev":0,"op":"upsert","row":{"url":"https://x","title":"x"}}]')$$, '28000', 'A0 an empty subject cannot push');
+select set_config('request.jwt.claims', '{"role":"authenticated"}', false) \g /dev/null
+select pg_temp.fails($$select public.pull_changes(0)$$, '28000', 'A0 no subject cannot pull');
+
 -- V: validation happens before any write
 select pg_temp.fails($$select pg_temp.push('uA', '[{"table":"saves","id":"k","base_rev":0,"op":"deleet"}]')$$, '22023', 'V1 unknown op rejected');
 select pg_temp.fails($$select pg_temp.push('uA', '[{"table":"saves","id":"k","op":"upsert","row":{"url":"https://a","title":"t"}}]')$$, '22023', 'V2 missing base_rev rejected');
@@ -201,4 +207,10 @@ begin
 end $$;
 select pg_temp.ok(current_setting('test.got') = 'r1;r2;', 'R3 a full download pages past the floor (pages: r1, r2) and the purged r3 is simply absent');
 select pg_temp.ok((pg_temp.pull('uQ', 1, 1, false))->>'resync' = 'true', 'R3 the same cursor in an incremental pull is still told to resync');
+-- R4: the last page's cursor is the head, so after that download incremental pulls work (no re-download loop;
+-- found by the B3 end-to-end tests: r3, the newest revision, was a purged tombstone above r2).
+select pg_temp.ok((pg_temp.pull('uQ', 1, 1, true))->>'next_cursor' = '4' and (pg_temp.pull('uQ', 1, 1, true))->>'more' = 'false',
+  'R4 the last page of a full download ends at the head (4), past the purged r3');
+select pg_temp.ok((pg_temp.pull('uQ', 4, 1, false))->>'resync' = 'false', 'R4 an incremental pull from there is not told to resync');
+select pg_temp.ok((pg_temp.pull('uQ', 0, 1, true))->>'next_cursor' = '1', 'R4 a page with more rows after it still ends at its last row');
 reset role;
