@@ -12,7 +12,8 @@ DBS=()
 cleanup() { for d in "${DBS[@]:-}"; do [ -n "$d" ] && dropdb --if-exists "$d" >/dev/null 2>&1 || true; done; }
 trap cleanup EXIT
 
-newdb() { local d="savesy_test_$(date +%s)_$$_$RANDOM"; createdb "$d"; DBS+=("$d"); psql -X -q -v ON_ERROR_STOP=1 -d "$d" -f supabase/tests/emulate_supabase.sql >/dev/null; echo "$d"; }
+# newdb runs in $(...), a subshell, so it can't register its database for cleanup: callers use mkdb instead.
+newdb() { local d="savesy_test_$(date +%s)_$$_$RANDOM"; createdb "$d"; psql -X -q -v ON_ERROR_STOP=1 -d "$d" -f supabase/tests/emulate_supabase.sql >/dev/null; echo "$d"; }
 migrate() { # migrate DB [only-before NAME | from NAME]
   local db="$1" mode="${2:-all}" name="${3:-}"
   for m in supabase/migrations/*.sql; do
@@ -22,16 +23,17 @@ migrate() { # migrate DB [only-before NAME | from NAME]
     local log; log="$(psql -X -q -v ON_ERROR_STOP=1 -d "$db" -f "$m" 2>&1 >/dev/null)" || { echo "not ok - migration $m failed:" >&2; echo "$log" | grep -v NOTICE >&2; exit 1; }
   done
 }
+mkdb() { DB="$(newdb)"; DBS+=("$DB"); }
 run_sql() { psql -X -q -v ON_ERROR_STOP=1 -d "$1" -f "$2" | sed '/^$/d'; }
 
 echo "# 1. fresh install"
-DB="$(newdb)"; migrate "$DB"; echo "applied $(ls supabase/migrations/*.sql | wc -l) migrations"
+mkdb; migrate "$DB"; echo "applied $(ls supabase/migrations/*.sql | wc -l) migrations"
 for t in supabase/tests/*.test.sql; do echo "## $t"; run_sql "$DB" "$t"; done
 
 echo "# 2. races"
 for dir in supabase/tests/races/*/; do
   [ -d "$dir" ] || continue
-  DB="$(newdb)"; migrate "$DB"
+  mkdb; migrate "$DB"
   app="race_$$_$RANDOM"; echo "## $dir"
   PGAPPNAME="$app" psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$dir/A.sql" >/dev/null & pid=$!
   held=0
@@ -50,7 +52,7 @@ for dir in supabase/tests/upgrade/*/; do
   [ -d "$dir" ] || continue
   name="$(basename "$dir")"
   [ -f "supabase/migrations/$name.sql" ] || { echo "not ok - $dir names no migration" >&2; exit 1; }
-  DB="$(newdb)"; echo "## $dir"
+  mkdb; echo "## $dir"
   migrate "$DB" before "$name"; run_sql "$DB" "$dir/seed.sql"
   migrate "$DB" from "$name"; run_sql "$DB" "$dir/check.sql"
 done
