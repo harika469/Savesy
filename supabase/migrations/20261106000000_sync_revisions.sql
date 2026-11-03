@@ -180,8 +180,10 @@ end $$;
 -- Floors: tombstones at or below a user's floor may have been purged. An INCREMENTAL pull (p_full = false) whose cursor
 -- is below the floor might have missed a deletion, so it gets resync = true on every such page: re-download from 0.
 -- A FULL download (p_full = true, from p_since = 0 until more = false) skips that check on every page: the device is
--- rebuilding from scratch and treats anything it didn't receive as gone, so a deletion purged mid-download is still
--- applied (the row is simply absent).
+-- rebuilding from scratch and treats anything it didn't receive as gone. CALLER CONTRACT: every page returns the floor,
+-- and if it differs from the floor on page 1 the caller must restart from 0. A row received on an earlier page may
+-- have been deleted since and its tombstone purged before the download reached it; the server can't report that,
+-- and without the restart the device would keep a copy of a deleted row (found by the B3 end-to-end tests).
 -- STABLE: the floor, head and rows of one call come from one snapshot, so a concurrent purge is either fully
 -- visible (resync) or not at all.
 create function public.pull_changes(p_since bigint, p_limit integer default 500, p_full boolean default false) returns jsonb
