@@ -49,7 +49,8 @@
     "postinstall": "patch-package",
     "android:dev": "expo run:android",
     "ios:dev": "expo run:ios",
-    "test": "jest"
+    "test": "jest",
+    "test:db": "bash supabase/tests/run.sh"
   },
   "private": true,
   "jest": {
