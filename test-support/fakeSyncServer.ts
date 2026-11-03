@@ -59,8 +59,10 @@ export class FakeSyncServer {
     const stream = (['collections', 'saves'] as Table[]).flatMap(t => [...u.rows[t].values()].filter(r => r.rev > since).map(r => ({ table: t, row: { ...r } })));
     stream.sort((a, b) => a.row.rev - b.row.rev);
     const page = stream.slice(0, lim);
-    const last = page.length ? page[page.length - 1].row.rev : Math.max(since, u.head);
-    return { resync: false, head: u.head, floor: u.floor, changes: page, next_cursor: last, more: stream.length > lim };
+    const more = stream.length > lim;
+    // Like B1: the last page ends at the head (no row lies between), so a purged newest tombstone can't leave cursor < floor.
+    const last = more ? page[page.length - 1].row.rev : Math.max(since, u.head, page.length ? page[page.length - 1].row.rev : 0);
+    return { resync: false, head: u.head, floor: u.floor, changes: page, next_cursor: last, more };
   }
 
   push(uid: string, changes: PushChange[]): PushResult[] {

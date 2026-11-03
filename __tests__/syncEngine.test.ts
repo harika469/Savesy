@@ -274,6 +274,34 @@ describe('ChatGPT review of #3: paging, purges and restores', () => {
     expect(server.row(U, 'saves', 'gone2')).toBeUndefined();
   });
 
+  it('a deletion purged mid-download, of a row already received on an earlier page, is not missed (restart on floor change)', async () => {
+    const a = new Device(server, U); for (const id of ['g1', 'g2', 'g3', 'g4', 'g5', 'g6']) a.add(save(id)); await a.sync();
+    const b = new Device(server, U, undefined, 2); await b.sync();
+    a.remove('saves', 'g6'); await a.sync(); server.purgeTombstones();     // B must re-download
+    let fullPages = 0, victim = '';
+    server.beforePull = async () => {
+      if (victim || !b.state.meta.needsResync || ++fullPages !== 2) return;
+      // Before B's second full page: A deletes a row B got on page 1, and the retention job purges the tombstone.
+      victim = server.live(U, 'saves').sort((x, y) => x.rev - y.rev)[0].id;
+      a.remove('saves', victim); await a.sync(); server.purgeTombstones();
+    };
+    await b.sync();
+    server.beforePull = undefined;
+    expect(victim).not.toBe('');
+    expect(b.get(victim)).toBeUndefined();                                  // no ghost copy
+    expect(b.ids()).toEqual(server.live(U, 'saves').map(r => r.id).sort());
+  });
+
+  it('after a re-download caused by a purge, later syncs are incremental (no re-download loop)', async () => {
+    const a = new Device(server, U); for (const id of ['k1', 'k2', 'last']) a.add(save(id)); await a.sync();
+    const b = new Device(server, U, undefined, 2); await b.sync();
+    a.remove('saves', 'last'); await a.sync(); server.purgeTombstones();   // the newest revision was the purged tombstone
+    await b.sync();
+    expect(b.state.meta.cursor).toBe(server.users.get(U)!.head);
+    const pulls = server.pulls; await b.sync();
+    expect(server.pulls - pulls).toBe(2);                                   // one incremental page before and after pushing
+  });
+
   it('keeping an item deleted elsewhere is sent as an explicit restore; a plain upsert over a tombstone would conflict', async () => {
     const a = new Device(server, U); a.add(save('s1')); await a.sync();
     const b = new Device(server, U); await b.sync();

@@ -1,7 +1,7 @@
-/** A simulated phone: its own engine state, talking to a FakeSyncServer as one user. */
+/** A simulated phone: its own engine state, talking to a server (FakeSyncServer, or real PostgreSQL in B3) as one user. */
+export type SyncServer = { transport(uid: string): SyncTransport };
 import { Collection, SavedItem } from '@/types';
-import { emptyMeta, EngineState, resolveConflict, runSync, SyncOutcome, Table } from '@/utils/syncEngine';
-import { FakeSyncServer } from './fakeSyncServer';
+import { emptyMeta, EngineState, resolveConflict, runSync, SyncOutcome, SyncTransport, Table } from '@/utils/syncEngine';
 
 let clock = Date.parse('2026-11-01T10:00:00.000Z');
 export const tick = () => new Date((clock += 1000)).toISOString();
@@ -14,7 +14,7 @@ export function collection(id: string, name = id): Collection { const t = tick()
 
 export class Device {
   state: EngineState;
-  constructor(public server: FakeSyncServer, public uid: string, state?: EngineState, public pageSize = 500) {
+  constructor(public server: SyncServer, public uid: string, state?: EngineState, public pageSize = 500) {
     this.state = state ?? { local: { saves: [], collections: [] }, meta: emptyMeta() };
   }
   apply = (fn: (s: EngineState) => EngineState) => { this.state = fn(this.state); };

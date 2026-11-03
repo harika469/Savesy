@@ -50,7 +50,8 @@
     "android:dev": "expo run:android",
     "ios:dev": "expo run:ios",
     "test": "jest",
-    "test:db": "bash supabase/tests/run.sh"
+    "test:db": "bash supabase/tests/run.sh",
+    "test:e2e": "SAVESY_PG=1 jest __tests__/e2e.pg.test.ts"
   },
   "private": true,
   "jest": {

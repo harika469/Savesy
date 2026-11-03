@@ -48,7 +48,7 @@ export type PushResult = { table: Table; id: string; status: 'applied' | 'confli
 export type PullPage = { resync: boolean; head: number; floor: number; changes: { table: Table; row: ServerRow }[]; next_cursor: number; more: boolean };
 export interface SyncTransport {
   /** Keyset paging on rev (no pinned head): repeat with next_cursor until more = false. `full`: a download from 0 that
-   *  rebuilds from scratch (the server then skips the tombstone-floor check). */
+   *  rebuilds from scratch (the server then skips the tombstone-floor check; the client restarts if the floor moves). */
   pull(since: number, limit: number, full: boolean): Promise<PullPage>;
   push(changes: PushChange[]): Promise<PushResult[]>;
 }
@@ -253,15 +253,20 @@ async function pullAll(io: SyncIO): Promise<void> {
   // A download that starts at 0 (first sync or re-download) is a full one: it gets every row and reconciles at the end.
   let full = since === 0;
   let restarts = 0;
+  let startFloor: number | null = null;   // the floor when this full download began
   const seen = new Set<string>();
   // Keyset paging (no pinned head): a row changed while we page moves ahead of the cursor and is delivered later
   // at its newest version, so when a page says more = false every row that exists has been seen at its latest.
   for (let guard = 0; guard < 100000; guard++) {
     const page = await io.transport.pull(since, limit, full);
-    if (page.resync) {
-      // The server purged deletions newer than our cursor (possibly mid-download): start again from 0.
+    if (full && since === 0) startFloor = page.floor;
+    // Restart from 0 when: an incremental pull is below the floor (deletions we never saw were purged), or the floor
+    // rose during a full download (a row delivered on an earlier page may have been deleted and that deletion purged
+    // before we reached it; the server can't tell us, so only a fresh download is safe).
+    const floorMoved = full && startFloor !== null && page.floor !== startFloor;
+    if (page.resync || floorMoved) {
       if (++restarts > 3) throw new Error('The server kept asking for a re-download.');
-      resync = true; full = true; since = 0; seen.clear();
+      resync = true; full = true; since = 0; seen.clear(); startFloor = null;
       io.apply(s => ({ ...s, meta: { ...s.meta, needsResync: true } }));
       continue;
     }

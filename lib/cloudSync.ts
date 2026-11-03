@@ -11,10 +11,13 @@ export function friendlyCloudError(message: string): string {
   return message.endsWith('.') ? message : `${message}.`;
 }
 
-/** The B1 sync protocol over Supabase RPC (push_changes / pull_changes). Requests carry the Clerk token. */
-export function supabaseTransport(): SyncTransport {
+type RpcClient = { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { message: string } | null }> };
+
+/** The B1 sync protocol over Supabase RPC (push_changes / pull_changes). Requests carry the Clerk token.
+ *  `getClient` is only overridden by tests (B3 runs this exact transport against real PostgreSQL). */
+export function supabaseTransport(getClient: () => RpcClient | null = getSupabase): SyncTransport {
   const client = () => {
-    const supabase = getSupabase();
+    const supabase = getClient();
     if (!supabase) throw new Error('Cloud sync is not configured.');
     return supabase;
   };
