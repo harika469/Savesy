@@ -3,13 +3,20 @@
 --   * conditional writes: push_changes applies a change only if the row is still at the client's base_rev,
 --     otherwise it returns a conflict with the server row (no silent overwrite, no reliance on phone clocks);
 --   * durable tombstones: deletes set deleted_at and scrub content, so every device learns about them;
---   * one ordered, paged pull stream across saves and collections (pull_changes);
+--   * one ordered, paged pull stream across saves and collections (pull_changes, keyset paging on rev);
+--   * deleting needs a live row; bringing a deleted item back needs the explicit 'restore' op;
 --   * tombstone retention with a per-user floor (purge_tombstones, server only).
 -- Clients can no longer write the tables directly (read-only RLS); all writes go through push_changes.
 --
 -- Existing data: every existing row is kept unchanged and numbered; see the backfill below.
 -- Old app builds (before this sync client) can still read but their direct writes are refused.
 -- Rollback: see the end of this file.
+--
+-- Run time and locking (measured, supabase/tests/perf/migration_timing.sh): about 10 s for 512,000 rows (2,000 users,
+-- 250 saves + 6 collections each); the slowest step is numbering the saves (~7 s). If the platform runs this in one
+-- transaction, reads and writes on saves/collections wait for that long. For the beta's data it is milliseconds.
+-- Take a backup first. lock_timeout makes it fail fast (and roll back cleanly) instead of queueing behind live traffic.
+set lock_timeout = '10s';
 
 -- 1) Columns, nullable during backfill ------------------------------------------------------------
 alter table public.saves add column rev bigint, add column deleted_at timestamptz;
@@ -22,25 +29,17 @@ create table public.sync_heads (
 );
 alter table public.sync_heads enable row level security;   -- no policies: server functions only
 
--- 2) Backfill: number every existing row per user. Order: last change first-to-last, collections before saves on
+-- 2) Backfill: number every existing row per user, once. Order: last change first-to-last, collections before saves on
 --    ties (so a collection precedes the saves that point at it), then id for determinism.
-with all_rows as (
-  select user_id, 0 as kind, id, updated_at from public.collections
-  union all
-  select user_id, 1 as kind, id, updated_at from public.saves
-), numbered as (
-  select user_id, kind, id, row_number() over (partition by user_id order by updated_at, kind, id) as rn from all_rows
-)
-update public.collections c set rev = n.rn from numbered n where n.kind = 0 and c.user_id = n.user_id and c.id = n.id;
-
-with all_rows as (
-  select user_id, 0 as kind, id, updated_at from public.collections
-  union all
-  select user_id, 1 as kind, id, updated_at from public.saves
-), numbered as (
-  select user_id, kind, id, row_number() over (partition by user_id order by updated_at, kind, id) as rn from all_rows
-)
-update public.saves s set rev = n.rn from numbered n where n.kind = 1 and s.user_id = n.user_id and s.id = n.id;
+create temp table sync_backfill as
+  select user_id, kind, id, row_number() over (partition by user_id order by updated_at, kind, id) as rn
+  from (select user_id, 0 as kind, id, updated_at from public.collections
+        union all
+        select user_id, 1 as kind, id, updated_at from public.saves) all_rows;
+create index on sync_backfill (kind, user_id, id);
+update public.collections c set rev = n.rn from sync_backfill n where n.kind = 0 and c.user_id = n.user_id and c.id = n.id;
+update public.saves s set rev = n.rn from sync_backfill n where n.kind = 1 and s.user_id = n.user_id and s.id = n.id;
+drop table sync_backfill;
 
 insert into public.sync_heads (user_id, rev)
 select user_id, max(rev) from (select user_id, rev from public.collections union all select user_id, rev from public.saves) r group by user_id;
@@ -75,12 +74,12 @@ begin
   if tbl is null or tbl not in ('saves','collections') then raise exception 'bad table' using errcode = '22023'; end if;
   if jsonb_typeof(ch->'id') is distinct from 'string' or length(ch->>'id') not between 1 and 200 then raise exception 'bad id' using errcode = '22023'; end if;
   if jsonb_typeof(ch->'base_rev') is distinct from 'number' or (ch->>'base_rev') !~ '^[0-9]{1,18}$' then raise exception 'base_rev must be a non-negative integer' using errcode = '22023'; end if;
-  if ch->>'op' is null or ch->>'op' not in ('upsert','delete') then raise exception 'op must be upsert or delete' using errcode = '22023'; end if;
+  if ch->>'op' is null or ch->>'op' not in ('upsert','delete','restore') then raise exception 'op must be upsert, delete or restore' using errcode = '22023'; end if;
   if ch->>'op' = 'delete' then
     if ch ? 'row' then raise exception 'delete takes no row' using errcode = '22023'; end if;
     return;
   end if;
-  if jsonb_typeof(ch->'row') is distinct from 'object' then raise exception 'upsert needs a row object' using errcode = '22023'; end if;
+  if jsonb_typeof(ch->'row') is distinct from 'object' then raise exception '% needs a row object', ch->>'op' using errcode = '22023'; end if;
   if pg_column_size(ch->'row') > 64000 then raise exception 'row too large' using errcode = '22023'; end if;
   allowed_row := case tbl
     when 'saves' then array['url','title','note','type','source','image_url','tags','collection_id','is_favorite','created_at','updated_at','last_rediscovered_at','details']
@@ -93,14 +92,17 @@ begin
 end $$;
 
 -- 5) Writes ---------------------------------------------------------------------------------------------
--- One change: {"table":"saves"|"collections","id":..,"base_rev":N,"op":"upsert"|"delete","row":{...}}.
--- Applied only if the server row is still at base_rev (0 = "I have never seen it").
--- Result per change: applied (+ new rev and the stored row) | conflict (+ server row) | noop (delete of an unknown id).
+-- One change: {"table":"saves"|"collections","id":..,"base_rev":N,"op":"upsert"|"delete"|"restore","row":{...}}.
+-- Applied only if the server row is still at base_rev (0 = "I have never seen it"). Deletions win unless undone on purpose:
+--   upsert  creates (base_rev 0) or edits a LIVE row; over a deleted row it is a conflict (the client learns it was deleted);
+--   delete  deletes a live row; on an unknown or already-deleted row it is a noop that uses no revision;
+--   restore brings a DELETED row back with new content (the person chose to keep it); on a live row it is a conflict.
+-- Result per change: applied (+ new rev and the stored row) | conflict (+ server row) | noop (+ server row, if any).
 create function public.push_changes(p_changes jsonb) returns jsonb
 language plpgsql volatile security definer set search_path = '' as $$
 declare
   uid text := auth.jwt() ->> 'sub';
-  ch jsonb; tbl text; cid text; base bigint; cur_rev bigint; next_rev bigint; out jsonb := '[]'::jsonb; srv jsonb; col_ok boolean; s record;
+  ch jsonb; tbl text; cid text; base bigint; cur_rev bigint; cur_deleted boolean; next_rev bigint; out jsonb := '[]'::jsonb; srv jsonb; col_ok boolean; s record; op text;
 begin
   if uid is null then raise exception 'not signed in' using errcode = '28000'; end if;
   if jsonb_typeof(p_changes) is distinct from 'array' then raise exception 'changes must be an array' using errcode = '22023'; end if;
@@ -111,27 +113,34 @@ begin
   perform 1 from public.sync_heads where user_id = uid for update;   -- serializes this user's writes => revisions commit in order
 
   for ch in select * from jsonb_array_elements(p_changes) loop
-    tbl := ch->>'table'; cid := ch->>'id'; base := (ch->>'base_rev')::bigint;
-    execute format('select rev from public.%I where user_id = $1 and id = $2', tbl) into cur_rev using uid, cid;
+    tbl := ch->>'table'; cid := ch->>'id'; base := (ch->>'base_rev')::bigint; op := ch->>'op';
+    cur_rev := null; cur_deleted := null;
+    execute format('select rev, deleted_at is not null from public.%I where user_id = $1 and id = $2', tbl) into cur_rev, cur_deleted using uid, cid;
+    execute format('select to_jsonb(t) - ''user_id'' from public.%I t where user_id = $1 and id = $2', tbl) into srv using uid, cid;
 
     if coalesce(cur_rev, 0) <> base then
-      execute format('select to_jsonb(t) - ''user_id'' from public.%I t where user_id = $1 and id = $2', tbl) into srv using uid, cid;
       out := out || jsonb_build_object('table', tbl, 'id', cid, 'status', 'conflict', 'server', srv);
       continue;
     end if;
 
-    if ch->>'op' = 'delete' and cur_rev is null then
-      out := out || jsonb_build_object('table', tbl, 'id', cid, 'status', 'noop');
+    if op = 'delete' and (cur_rev is null or cur_deleted) then
+      -- Nothing to delete (never existed, or already deleted, e.g. a retried request): no revision used.
+      out := out || jsonb_build_object('table', tbl, 'id', cid, 'status', 'noop', 'server', srv);
+      continue;
+    end if;
+    if (op = 'upsert' and cur_deleted) or (op = 'restore' and not coalesce(cur_deleted, false)) then
+      -- upsert can't silently undo a delete; restore only applies to a deleted row.
+      out := out || jsonb_build_object('table', tbl, 'id', cid, 'status', 'conflict', 'server', srv);
       continue;
     end if;
 
     update public.sync_heads set rev = rev + 1 where user_id = uid returning rev into next_rev;
 
-    if ch->>'op' = 'delete' and tbl = 'saves' then
+    if op = 'delete' and tbl = 'saves' then
       update public.saves set deleted_at = now(), rev = next_rev, url = '', title = '', note = null, source = null, image_url = null,
         tags = '{}', collection_id = null, is_favorite = false, details = null, last_rediscovered_at = null
       where user_id = uid and id = cid;
-    elsif ch->>'op' = 'delete' then
+    elsif op = 'delete' then
       update public.collections set deleted_at = now(), rev = next_rev, name = '·' where user_id = uid and id = cid;
       for s in select id from public.saves where user_id = uid and collection_id = cid and deleted_at is null order by id loop
         update public.sync_heads set rev = rev + 1 where user_id = uid returning rev into next_rev;
@@ -161,16 +170,21 @@ begin
 end $$;
 
 -- 6) Reads ----------------------------------------------------------------------------------------------
--- One ordered stream across both tables. First call: pass p_since (0 for a fresh device) and no head; the
--- response pins `head`. Next pages: pass the returned next_cursor as p_since and the same head, until more = false.
--- Every revision <= head is committed (writes are serialized per user and bump the head in the same transaction),
--- so paging within (since, head] never misses or repeats a row. Writes after the head arrive in the next round.
+-- One ordered stream across both tables, paged by revision: call with p_since = 0 (fresh device) or the last
+-- next_cursor, and repeat with the returned next_cursor until more = false.
+-- Why this never misses a row: a row's revision only grows, and each user's writes are serialized and commit in
+-- revision order (the head is bumped in the same transaction), so the committed revisions a reader sees always form
+-- a prefix. A row not yet delivered has rev > cursor; if it changes while a device is paging, its rev grows and it
+-- is delivered later at its newest version. A row already delivered that changes again is delivered again. When a
+-- call returns more = false, every row that existed at that moment has been delivered at its latest version.
 -- If p_since is below the user's floor (tombstones purged), the response says resync = true: re-download from 0.
-create function public.pull_changes(p_since bigint, p_head bigint default null, p_limit integer default 500) returns jsonb
+-- STABLE: the floor, head and rows of one call come from one snapshot, so a concurrent purge is either fully
+-- visible (resync) or not at all.
+create function public.pull_changes(p_since bigint, p_limit integer default 500) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare
   uid text := auth.jwt() ->> 'sub';
-  cur_head bigint; cur_floor bigint; head bigint; lim integer; page jsonb; last_rev bigint; more boolean;
+  cur_head bigint; cur_floor bigint; lim integer; page jsonb; last_rev bigint; more boolean;
 begin
   if uid is null then raise exception 'not signed in' using errcode = '28000'; end if;
   if p_since is null or p_since < 0 then raise exception 'p_since must be >= 0' using errcode = '22023'; end if;
@@ -178,48 +192,56 @@ begin
   if p_since > 0 and p_since < cur_floor then
     return jsonb_build_object('resync', true, 'head', cur_head, 'floor', cur_floor, 'changes', '[]'::jsonb, 'next_cursor', 0, 'more', false);
   end if;
-  head := coalesce(p_head, cur_head);
-  if head > cur_head or head < p_since then raise exception 'bad head' using errcode = '22023'; end if;
   lim := least(greatest(coalesce(p_limit, 500), 1), 500);
 
   with stream as (
-    select 'collections'::text as tbl, c.rev, to_jsonb(c) - 'user_id' as row from public.collections c where c.user_id = uid and c.rev > p_since and c.rev <= head
+    select 'collections'::text as tbl, c.rev, to_jsonb(c) - 'user_id' as row from public.collections c where c.user_id = uid and c.rev > p_since
     union all
-    select 'saves'::text, s.rev, to_jsonb(s) - 'user_id' from public.saves s where s.user_id = uid and s.rev > p_since and s.rev <= head
+    select 'saves'::text, s.rev, to_jsonb(s) - 'user_id' from public.saves s where s.user_id = uid and s.rev > p_since
   ), pg as (select * from stream order by rev limit lim)
   select coalesce(jsonb_agg(jsonb_build_object('table', tbl, 'row', row) order by rev), '[]'::jsonb), max(rev) into page, last_rev from pg;
 
-  last_rev := coalesce(last_rev, head);
-  more := exists (select 1 from public.collections where user_id = uid and rev > last_rev and rev <= head)
-       or exists (select 1 from public.saves where user_id = uid and rev > last_rev and rev <= head);
-  return jsonb_build_object('resync', false, 'head', head, 'floor', cur_floor, 'changes', page, 'next_cursor', last_rev, 'more', more);
+  last_rev := coalesce(last_rev, greatest(p_since, cur_head));
+  more := exists (select 1 from public.collections where user_id = uid and rev > last_rev)
+       or exists (select 1 from public.saves where user_id = uid and rev > last_rev);
+  return jsonb_build_object('resync', false, 'head', cur_head, 'floor', cur_floor, 'changes', page, 'next_cursor', last_rev, 'more', more);
 end $$;
 
 -- 7) Tombstone retention (server only, e.g. a daily scheduled job) -----------------------------------------
 -- Deletes tombstones older than p_older_than and raises each affected user's floor to the highest purged revision.
+-- Takes each affected user's sync lock first (in user_id order), so it never interleaves with that user's
+-- push_changes. Pulls see a purge entirely or not at all (one snapshot per call) and every page checks the floor,
+-- so a device paging across a purge is told to resync on its next page.
 create function public.purge_tombstones(p_older_than interval) returns integer
 language plpgsql volatile security definer set search_path = '' as $$
-declare n integer := 0; m integer;
+declare n integer := 0; u record; m integer; max_rev bigint;
 begin
   if p_older_than < interval '7 days' then raise exception 'retention must be at least 7 days' using errcode = '22023'; end if;
-  with gone as (
-    delete from public.saves where deleted_at is not null and deleted_at < now() - p_older_than returning user_id, rev
-  ), gone_c as (
-    delete from public.collections where deleted_at is not null and deleted_at < now() - p_older_than returning user_id, rev
-  ), all_gone as (select * from gone union all select * from gone_c)
-  , floors as (
-    update public.sync_heads h set floor_rev = greatest(h.floor_rev, g.max_rev)
-    from (select user_id, max(rev) as max_rev from all_gone group by user_id) g where h.user_id = g.user_id returning 1
-  )
-  select count(*) into m from all_gone;
-  n := n + m;
+  for u in
+    select h.user_id from public.sync_heads h
+    where exists (select 1 from public.saves s where s.user_id = h.user_id and s.deleted_at < now() - p_older_than)
+       or exists (select 1 from public.collections c where c.user_id = h.user_id and c.deleted_at < now() - p_older_than)
+    order by h.user_id
+  loop
+    perform 1 from public.sync_heads where user_id = u.user_id for update;
+    with gone as (
+      delete from public.saves where user_id = u.user_id and deleted_at is not null and deleted_at < now() - p_older_than returning rev
+    ), gone_c as (
+      delete from public.collections where user_id = u.user_id and deleted_at is not null and deleted_at < now() - p_older_than returning rev
+    )
+    select count(*), max(rev) into m, max_rev from (select rev from gone union all select rev from gone_c) g;
+    if m > 0 then
+      update public.sync_heads set floor_rev = greatest(floor_rev, max_rev) where user_id = u.user_id;
+      n := n + m;
+    end if;
+  end loop;
   return n;
 end $$;
 
 -- 8) Grants (explicit; migration 20261105000001 means nothing is client-callable by default) -------------
-revoke all on function public.sync_validate_change(jsonb), public.push_changes(jsonb), public.pull_changes(bigint, bigint, integer),
+revoke all on function public.sync_validate_change(jsonb), public.push_changes(jsonb), public.pull_changes(bigint, integer),
   public.purge_tombstones(interval) from public, anon, authenticated;
-grant execute on function public.push_changes(jsonb), public.pull_changes(bigint, bigint, integer) to authenticated;
+grant execute on function public.push_changes(jsonb), public.pull_changes(bigint, integer) to authenticated;
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.purge_tombstones(interval) to service_role;
@@ -227,7 +249,7 @@ do $$ begin
 end $$;
 
 -- Rollback (only before any client has written through push_changes; afterwards tombstones would be lost):
---   drop function public.purge_tombstones(interval), public.pull_changes(bigint, bigint, integer),
+--   drop function public.purge_tombstones(interval), public.pull_changes(bigint, integer),
 --     public.push_changes(jsonb), public.sync_validate_change(jsonb);
 --   drop policy "read own saves" on public.saves; drop policy "read own collections" on public.collections;
 --   (recreate the "own saves"/"own collections" policies from 20261103000000 and re-grant insert/update/delete)

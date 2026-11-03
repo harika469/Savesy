@@ -39,19 +39,19 @@ select pg_temp.ok(not exists (select 1 from public.saves s where s.collection_id
                   'U9 every save''s collection still exists');
 
 -- Existing data is fully usable through the new sync functions
-create function pg_temp.pull(u text, since bigint, head bigint default null, lim integer default 500) returns jsonb language plpgsql as $$
-begin perform set_config('request.jwt.claims', json_build_object('sub', u)::text, false); return public.pull_changes(since, head, lim); end $$;
+create function pg_temp.pull(u text, since bigint, lim integer default 500) returns jsonb language plpgsql as $$
+begin perform set_config('request.jwt.claims', json_build_object('sub', u)::text, false); return public.pull_changes(since, lim); end $$;
 create function pg_temp.push(u text, changes text) returns jsonb language plpgsql as $$
 begin perform set_config('request.jwt.claims', json_build_object('sub', u)::text, false); return public.push_changes(changes::jsonb); end $$;
-grant execute on function pg_temp.pull(text, bigint, bigint, integer), pg_temp.push(text, text) to public;
+grant execute on function pg_temp.pull(text, bigint, integer), pg_temp.push(text, text) to public;
 set role authenticated;
 create temp table pulled (tbl text, id text, rev bigint);
 do $$
-declare cursor_rev bigint := 0; head bigint; page jsonb; pages int := 0;
+declare cursor_rev bigint := 0; page jsonb; pages int := 0;
 begin
   loop
-    page := pg_temp.pull('user_big', cursor_rev, head, 500);
-    head := (page->>'head')::bigint; pages := pages + 1;
+    page := pg_temp.pull('user_big', cursor_rev, 500);
+    pages := pages + 1;
     insert into pulled select c->>'table', c->'row'->>'id', (c->'row'->>'rev')::bigint from jsonb_array_elements(page->'changes') c;
     cursor_rev := (page->>'next_cursor')::bigint;
     exit when (page->>'more')::boolean = false;
