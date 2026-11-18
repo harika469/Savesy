@@ -19,6 +19,19 @@ export function inferMetadata(url: string): { title: string; source: string; typ
 }
 
 export function matchesSave(save: SavedItem, query: string) {
-  const haystack = [save.title, save.note, save.source, save.type, save.tags.join(' ')].join(' ').toLowerCase();
+  const haystack = [save.title, save.note, save.source, save.creator, save.type, save.tags.join(' ')].join(' ').toLowerCase();
   return haystack.includes(query.trim().toLowerCase());
+}
+
+export const thumbGradients: [string, string][] = [['#f97316', '#ef4444'], ['#06b6d4', '#3b82f6'], ['#ec4899', '#a855f7'], ['#22c55e', '#16a34a'], ['#f59e0b', '#f97316'], ['#8b5cf6', '#ec4899']];
+const typeEmoji: Record<SaveType, string> = { article: '📖', video: '🎬', product: '🛍️', place: '📍', social: '📱', other: '🔗' };
+
+export function thumbFor(save: SavedItem) {
+  const hash = [...save.title].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const [from, to] = thumbGradients[(save.gradient ?? hash) % thumbGradients.length];
+  return { emoji: save.emoji ?? typeEmoji[save.type], from, to };
+}
+
+export function isThisWeek(value: string) {
+  return Date.now() - new Date(value).getTime() < 7 * 86400000;
 }

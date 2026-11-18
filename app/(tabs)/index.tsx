@@ -1,22 +1,84 @@
-import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { HandwrittenNote } from '@/components/Doodles';
-import { SaveCard } from '@/components/SaveCard';
-import { Screen } from '@/components/Screen';
-import { PaperCard, PrimaryButton, ScreenHeader, SearchBar } from '@/components/ui';
-import { colors } from '@/constants/theme';
+import React, { useMemo, useState } from 'react';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSaves } from '@/context/SavesContext';
-import { relativeDate } from '@/utils/saves';
+import { SavedItem } from '@/types';
+import { isThisWeek, matchesSave, thumbFor } from '@/utils/saves';
+
+function ReelCard({ item, category, onPress }: { item: SavedItem; category?: string; onPress: () => void }) {
+  const thumb = thumbFor(item);
+  return <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && { opacity: 0.75 }]}>
+    <LinearGradient colors={[thumb.from, thumb.to]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.thumb}>
+      <Text style={styles.thumbEmoji}>{thumb.emoji}</Text>
+      {item.duration ? <Text style={styles.duration}>{item.duration}</Text> : null}
+    </LinearGradient>
+    <View style={styles.cardBody}>
+      <Text style={styles.cardTitle}>{item.title}</Text>
+      <Text style={styles.cardMeta}>{item.creator ?? item.source ?? item.type} • {category ?? item.type}</Text>
+      <View style={styles.pills}>{item.tags.slice(0, 3).map(tag => <Text key={tag} style={styles.pill}>#{tag}</Text>)}</View>
+    </View>
+  </Pressable>;
+}
 
 export default function HomeScreen() {
-  const router = useRouter(); const { saves, toggleFavorite, getRediscoverItem, updateSave } = useSaves(); const [skipped, setSkipped] = useState<string>();
-  const rediscover = getRediscoverItem(skipped);
-  return <Screen><View style={styles.brandRow}><Text style={styles.brand}>savesy.</Text><Ionicons name="happy-outline" size={27} /></View><ScreenHeader title="your internet memory." subtitle="save it now. actually find it later." /><SearchBar editable={false} placeholder="Search your saves..." onPress={() => router.push('/search')} />
-    <View style={styles.sectionRow}><Text style={styles.section}>Rediscover</Text><HandwrittenNote rotate="2deg">you had taste</HandwrittenNote></View>
-    {rediscover ? <PaperCard style={styles.rediscover}><Text style={styles.kicker}>REMEMBER THIS? ✨</Text><Text style={styles.hero}>{rediscover.title}</Text><Text style={styles.meta}>saved {relativeDate(rediscover.createdAt)} · {rediscover.source}</Text><View style={styles.actions}><View style={{ flex: 1 }}><PrimaryButton label="OPEN" icon="arrow-forward" onPress={() => { updateSave(rediscover.id, { lastRediscoveredAt: new Date().toISOString() }); router.push({ pathname: '/save/[id]', params: { id: rediscover.id } }); }} /></View><Pressable onPress={() => setSkipped(rediscover.id)} style={styles.notNow}><Text style={styles.notNowText}>NOT NOW</Text></Pressable></View></PaperCard> : null}
-    <View style={styles.sectionRow}><Text style={styles.section}>Recent saves</Text><Text style={styles.small}>{saves.length} little treasures</Text></View><View style={{ gap: 10 }}>{saves.slice(0, 5).map(item => <SaveCard key={item.id} item={item} onFavorite={() => toggleFavorite(item.id)} />)}</View>
-  </Screen>;
+  const router = useRouter(); const { saves, collections } = useSaves();
+  const [query, setQuery] = useState(''); const [folder, setFolder] = useState<string>();
+  const categoryName = useMemo(() => new Map(collections.map(c => [c.id, c.name])), [collections]);
+  const visible = useMemo(() => saves.filter(item => (!folder || item.collectionId === folder) && (!query.trim() || matchesSave(item, query))), [saves, folder, query]);
+  const thisWeek = saves.filter(item => isThisWeek(item.createdAt)).length;
+
+  return <SafeAreaView style={styles.safe} edges={['top']}>
+    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.wrap}>
+      <Text style={styles.h1}>📦 Savesy</Text>
+      <Text style={styles.sub}>Your saved reels, finally organised</Text>
+      <TextInput value={query} onChangeText={setQuery} placeholder="Search saved reels... e.g. paneer, Amsterdam, hair" placeholderTextColor="#8a8a8a" style={styles.search} />
+      <View style={styles.stats}>
+        <View style={styles.stat}><Text style={styles.statNumber}>{saves.length}</Text><Text style={styles.statLabel}>Saved</Text></View>
+        <View style={styles.stat}><Text style={styles.statNumber}>{collections.length}</Text><Text style={styles.statLabel}>Folders</Text></View>
+        <View style={styles.stat}><Text style={styles.statNumber}>{thisWeek}</Text><Text style={styles.statLabel}>This week</Text></View>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+        <Pressable onPress={() => setFolder(undefined)} style={[styles.chip, !folder && styles.chipActive]}><Text style={[styles.chipText, !folder && styles.chipTextActive]}>All</Text></Pressable>
+        {collections.map(c => <Pressable key={c.id} onPress={() => setFolder(c.id)} style={[styles.chip, folder === c.id && styles.chipActive]}><Text style={[styles.chipText, folder === c.id && styles.chipTextActive]}>{c.name}</Text></Pressable>)}
+      </ScrollView>
+      {visible.length ? <View style={styles.grid}>{visible.map(item => <ReelCard key={item.id} item={item} category={item.collectionId ? categoryName.get(item.collectionId) : undefined} onPress={() => router.push({ pathname: '/save/[id]', params: { id: item.id } })} />)}</View> : <Text style={styles.empty}>Nothing saved here yet.</Text>}
+      <View style={styles.note}>
+        <Text style={styles.noteText}><Text style={styles.noteBold}>How it works:</Text>{'\n'}1. In Instagram tap Share → Savesy{'\n'}2. Savesy extracts caption, creator, audio & hashtags{'\n'}3. It auto-files into Recipes / Travel / Fashion etc.{'\n'}4. Search later instead of scrolling saved!</Text>
+      </View>
+      <Pressable accessibilityRole="link" onPress={() => Linking.openURL('https://instagram.com')} style={styles.btn}><Text style={styles.btnText}>Open Instagram to try Share → Savesy</Text></Pressable>
+      <Text style={styles.footer}>Savesy • Works offline</Text>
+    </ScrollView>
+  </SafeAreaView>;
 }
-const styles = StyleSheet.create({ brandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }, brand: { fontSize: 24, fontWeight: '900', letterSpacing: -.8, color: colors.purple }, sectionRow: { marginTop: 30, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, section: { fontSize: 21, fontWeight: '900' }, small: { color: colors.gray, fontSize: 11 }, rediscover: { backgroundColor: colors.pinkSoft, borderColor: colors.pink }, kicker: { fontSize: 11, letterSpacing: 1.6, fontWeight: '900', color: colors.purpleDark }, hero: { fontSize: 27, lineHeight: 31, fontWeight: '900', marginTop: 18, maxWidth: '90%' }, meta: { marginTop: 8, color: colors.gray }, actions: { flexDirection: 'row', gap: 10, marginTop: 25 }, notNow: { minHeight: 54, paddingHorizontal: 14, justifyContent: 'center' }, notNowText: { fontSize: 12, fontWeight: '900', textDecorationLine: 'underline', color: colors.purpleDark } });
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#ffffff' },
+  wrap: { padding: 16, paddingBottom: 100, backgroundColor: '#ffffff' },
+  h1: { fontSize: 28, fontWeight: '700', marginTop: 4, marginBottom: 2, color: '#111' },
+  sub: { color: '#666', fontSize: 14 },
+  search: { width: '100%', paddingVertical: 12, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: '#e5e5e5', backgroundColor: '#f6f6f6', fontSize: 15, marginVertical: 14, color: '#111' },
+  stats: { flexDirection: 'row', gap: 10 },
+  stat: { flex: 1, backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#ffe4c7', borderRadius: 14, padding: 10, alignItems: 'center' },
+  statNumber: { fontSize: 20, fontWeight: '700', color: '#111' }, statLabel: { color: '#111', fontSize: 14 },
+  chips: { gap: 8, paddingVertical: 10 },
+  chip: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: '#eeeeee', backgroundColor: '#fff' },
+  chipActive: { backgroundColor: '#111', borderColor: '#111' }, chipText: { fontSize: 14, color: '#111' }, chipTextActive: { color: '#fff' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+  card: { width: '48.5%', borderWidth: 1, borderColor: '#eeeeee', borderRadius: 16, overflow: 'hidden', backgroundColor: '#fff' },
+  thumb: { height: 170, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thumbEmoji: { fontSize: 32 },
+  duration: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', color: '#fff', paddingVertical: 3, paddingHorizontal: 7, borderRadius: 999, fontSize: 11, overflow: 'hidden' },
+  cardBody: { padding: 10 },
+  cardTitle: { fontSize: 14, fontWeight: '700', lineHeight: 18, color: '#111' },
+  cardMeta: { color: '#777', fontSize: 12, marginTop: 2 },
+  pills: { flexDirection: 'row', flexWrap: 'wrap' },
+  pill: { backgroundColor: '#fef3c7', paddingVertical: 3, paddingHorizontal: 8, borderRadius: 999, fontSize: 11, marginTop: 6, marginRight: 4, color: '#111', overflow: 'hidden' },
+  empty: { textAlign: 'center', color: '#777', paddingVertical: 40 },
+  note: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a', padding: 12, borderRadius: 12, marginTop: 14 },
+  noteText: { fontSize: 13, lineHeight: 20, color: '#111' }, noteBold: { fontWeight: '700' },
+  btn: { backgroundColor: '#ec4899', padding: 10, borderRadius: 12, marginTop: 12, alignItems: 'center' },
+  btnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  footer: { fontSize: 12, color: '#888', textAlign: 'center', marginTop: 14 },
+});

@@ -8,6 +8,10 @@ export interface SavedItem {
   type: SaveType;
   source?: string;
   tags: string[];
+  creator?: string;
+  duration?: string;
+  emoji?: string;
+  gradient?: number;
   collectionId?: string;
   isFavorite: boolean;
   createdAt: string;

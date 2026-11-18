@@ -1,18 +1,20 @@
 import { Collection, SavedItem } from '@/types';
 
+const daysAgo = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
+
 export const seedCollections: Collection[] = [
-  { id: 'trips', name: '✈ Main character trips', createdAt: '2026-01-04T12:00:00.000Z' },
-  { id: 'buy', name: '♧ I might buy this', createdAt: '2026-01-05T12:00:00.000Z' },
-  { id: 'eat', name: '♨ Need to eat this', createdAt: '2026-01-06T12:00:00.000Z' },
-  { id: 'brain', name: '✦ Big brain energy', createdAt: '2026-01-07T12:00:00.000Z' },
+  { id: 'recipes', name: 'Recipes', createdAt: daysAgo(30) },
+  { id: 'travel', name: 'Travel', createdAt: daysAgo(30) },
+  { id: 'fashion', name: 'Fashion', createdAt: daysAgo(30) },
+  { id: 'home', name: 'Home', createdAt: daysAgo(30) },
+  { id: 'try', name: 'To Try', createdAt: daysAgo(30) },
 ];
 
 export const seedSaves: SavedItem[] = [
-  { id: 'prague-pasta', url: 'https://maps.google.com/?q=Prague+pasta', title: 'That pasta place in Prague', note: 'Book the tiny table by the window.', type: 'place', source: 'Google Maps', tags: ['prague', 'pasta', 'trip'], collectionId: 'trips', isFavorite: true, createdAt: '2026-08-22T12:00:00.000Z' },
-  { id: 'focus-playlist', url: 'https://open.spotify.com/', title: 'Focus playlist for deep work', note: 'No lyrics, genuinely useful.', type: 'other', source: 'Spotify', tags: ['music', 'focus'], collectionId: 'brain', isFavorite: false, createdAt: '2026-08-27T13:00:00.000Z' },
-  { id: 'ghent-guide', url: 'https://visit.gent.be/', title: 'Ghent weekend guide', note: 'Save the vintage market for Sunday.', type: 'article', source: 'Article', tags: ['ghent', 'weekend', 'travel'], collectionId: 'trips', isFavorite: false, createdAt: '2026-08-26T11:00:00.000Z' },
-  { id: 'green-dress', url: 'https://example.com/green-linen-dress', title: 'Green linen midi dress', note: 'This would work for summer dinners.', type: 'product', source: 'Product', tags: ['green dress', 'linen', 'outfit'], collectionId: 'buy', isFavorite: true, createdAt: '2026-08-24T11:00:00.000Z' },
-  { id: 'olive-outfit', url: 'https://example.com/olive-outfit', title: 'Olive summer outfit', type: 'social', source: 'Instagram', tags: ['green dress', 'outfit'], collectionId: 'buy', isFavorite: false, createdAt: '2026-08-20T11:00:00.000Z' },
-  { id: 'wardrobe', url: 'https://youtube.com/', title: 'Capsule wardrobe inspiration', type: 'video', source: 'YouTube', tags: ['green dress', 'style'], collectionId: 'buy', isFavorite: false, createdAt: '2026-08-12T11:00:00.000Z' },
-  { id: 'ramen', url: 'https://example.com/ramen', title: '15-minute sesame ramen', note: 'Add chili crisp.', type: 'article', source: 'Recipe', tags: ['ramen', 'dinner'], collectionId: 'eat', isFavorite: false, createdAt: '2026-08-18T11:00:00.000Z' },
+  { id: 'paneer', url: 'https://instagram.com/reel/paneer-butter-masala', title: '15-min Paneer Butter Masala', type: 'social', source: 'Instagram', creator: '@foodie_harika', duration: '0:32', emoji: '🍛', gradient: 0, tags: ['recipe', 'dinner'], collectionId: 'recipes', isFavorite: false, createdAt: daysAgo(0) },
+  { id: 'amsterdam-cafe', url: 'https://instagram.com/reel/hidden-cafe-amsterdam', title: 'Hidden Cafe in Amsterdam', type: 'social', source: 'Instagram', creator: '@wanderlust', duration: '0:45', emoji: '☕', gradient: 1, tags: ['amsterdam', 'cafe'], collectionId: 'travel', isFavorite: false, createdAt: daysAgo(1) },
+  { id: 'grwm', url: 'https://instagram.com/reel/grwm-wedding-outfit', title: 'GRWM - Wedding Outfit', type: 'social', source: 'Instagram', creator: '@style_diary', duration: '0:28', emoji: '👗', gradient: 2, tags: ['grwm', 'wedding'], collectionId: 'fashion', isFavorite: false, createdAt: daysAgo(2) },
+  { id: 'workout', url: 'https://instagram.com/reel/home-workout', title: '15-min Home Workout', type: 'social', source: 'Instagram', creator: '@fit_daily', duration: '0:41', emoji: '💪', gradient: 3, tags: ['workout'], collectionId: 'home', isFavorite: false, createdAt: daysAgo(3) },
+  { id: 'balcony', url: 'https://instagram.com/reel/balcony-makeover', title: 'Small Balcony Makeover', type: 'social', source: 'Instagram', creator: '@home.inspo', duration: '0:52', emoji: '🏠', gradient: 4, tags: ['decor'], collectionId: 'home', isFavorite: false, createdAt: daysAgo(10) },
+  { id: 'hair-oiling', url: 'https://instagram.com/reel/hair-oiling-routine', title: 'Hair Oiling Routine', type: 'social', source: 'Instagram', creator: '@glowup', duration: '0:35', emoji: '💇‍♀️', gradient: 5, tags: ['haircare'], collectionId: 'fashion', isFavorite: false, createdAt: daysAgo(12) },
 ];
