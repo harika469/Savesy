@@ -1,5 +1,8 @@
 package com.reelbox.app.domain
 
+import com.reelbox.app.data.Platform
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -31,33 +34,46 @@ object NoEnricher : ReelEnricher {
     override suspend fun enrich(link: ParsedLink): EnrichResult = EnrichResult.Unavailable
 }
 
-/**
- * Calls the `oembed` Supabase Edge Function (see supabase/functions/oembed). The function holds the
- * Meta token, so no secrets are shipped in the app.
- */
-class EdgeFunctionEnricher(private val baseUrl: String, private val anonKey: String) : ReelEnricher {
-    override suspend fun enrich(link: ParsedLink): EnrichResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+data class HttpResult(val code: Int, val body: String)
+
+/** code 0 means the request never completed (no network, timeout). */
+suspend fun httpGet(url: String): HttpResult = withContext(Dispatchers.IO) {
+    try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 6000
+            readTimeout = 8000
+            setRequestProperty("Accept", "application/json")
+        }
         try {
-            val endpoint = "${baseUrl.trimEnd('/')}/functions/v1/oembed?url=" + URLEncoder.encode(link.permalink, "UTF-8")
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 8000
-                setRequestProperty("apikey", anonKey)
-                setRequestProperty("Authorization", "Bearer $anonKey")
-            }
-            try {
-                when (connection.responseCode) {
-                    200 -> parse(connection.inputStream.bufferedReader().readText())
-                    in 400..499 -> EnrichResult.Unavailable
-                    else -> EnrichResult.Offline
-                }
-            } finally {
-                connection.disconnect()
-            }
-        } catch (_: IOException) {
-            EnrichResult.Offline
-        } catch (_: Exception) {
-            EnrichResult.Unavailable
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            HttpResult(code, stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+        } finally {
+            connection.disconnect()
+        }
+    } catch (_: IOException) {
+        HttpResult(0, "")
+    }
+}
+
+/**
+ * Meta's oEmbed endpoints, called straight from the phone. Since June 2026 they need no access token
+ * and no App Review for public content (limit: 1,000 requests per endpoint per hour, counted per caller,
+ * so each device gets its own allowance). Private, deleted or non-public reels come back as 4xx errors.
+ */
+class MetaOEmbedEnricher(
+    private val apiVersion: String = "v26.0",
+    private val fetch: suspend (String) -> HttpResult = ::httpGet,
+) : ReelEnricher {
+    override suspend fun enrich(link: ParsedLink): EnrichResult {
+        val endpoint = if (link.platform == Platform.INSTAGRAM) "instagram_oembed" else "oembed_video"
+        val url = "https://graph.facebook.com/$apiVersion/$endpoint?url=" + URLEncoder.encode(link.permalink, "UTF-8") + "&omitscript=true"
+        val response = fetch(url)
+        return when {
+            response.code in 200..299 -> try { parse(response.body) } catch (_: Exception) { EnrichResult.Unavailable }
+            // Network trouble, rate limit (429) or Meta outage: keep pending and retry later.
+            response.code == 0 || response.code == 429 || response.code >= 500 -> EnrichResult.Offline
+            else -> EnrichResult.Unavailable
         }
     }
 

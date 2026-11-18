@@ -3,7 +3,7 @@
 Native Android app from the Reelbox product handover: capture reels from Instagram / Facebook via
 **Share → Reelbox**, auto-file them into folders, then search, add notes and track status.
 
-Stack: Kotlin, Jetpack Compose (Material 3), Room (offline-first), Supabase Edge Function for oEmbed.
+Stack: Kotlin, Jetpack Compose (Material 3), Room (offline-first), Meta oEmbed (tokenless).
 
 ## Build
 
@@ -36,14 +36,12 @@ sub-folders, collections, affiliate "Act on this" cards (planned for month 3), F
 
 ## Enrichment (creator, caption, thumbnail)
 
-Without Supabase configured, every reel is saved for manual details (title + note). To enable oEmbed:
+`MetaOEmbedEnricher` calls Meta's oEmbed endpoints (`instagram_oembed`, `oembed_video`) straight from the
+phone, with **no access token, no Meta app and no backend**. Meta lifted the token and App Review
+requirement for public content in June 2026; the limit is 1,000 requests per endpoint per hour per caller.
 
-1. Create a Meta developer app with the oEmbed Read feature, then deploy `supabase/functions/oembed`
-   (`supabase secrets set META_APP_ID=... META_APP_SECRET=...`).
-2. Add to `local.properties` (not committed):
-   ```
-   supabase.url=https://<project>.supabase.co
-   supabase.anonKey=<anon key>
-   ```
-
-The Edge Function is written but **not deployed or tested** against Meta's API.
+- Private or deleted reels return an error, and the reel is kept as a manual card (title + note).
+- Rate limit, outages and no network keep the reel pending; it is retried on the next app start.
+- **Not yet verified against the live API**: what fields Meta returns today (caption, thumbnail) and whether
+  Facebook *reels* work through `oembed_video`. Check with a real public reel before relying on it.
+- Higher volume later: a token with App Review allows up to 5M requests/day, which would need a small server.
