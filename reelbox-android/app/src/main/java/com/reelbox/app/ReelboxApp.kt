@@ -6,7 +6,7 @@ import com.reelbox.app.data.AppDatabase
 import com.reelbox.app.data.ReelRepository
 import com.reelbox.app.domain.AiOrganiser
 import com.reelbox.app.domain.AnonymousAuth
-import com.reelbox.app.domain.ManualProvider
+import com.reelbox.app.domain.MetaOEmbedProvider
 import com.reelbox.app.domain.NoAiOrganiser
 import com.reelbox.app.domain.Session
 import com.reelbox.app.domain.SessionStore
@@ -19,8 +19,9 @@ class ReelboxApp : Application() {
             val auth = AnonymousAuth(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY, PrefsSessionStore(this))
             SupabaseAiOrganiser(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY, auth)
         } else NoAiOrganiser
-        // Meta's oEmbed needs app approval (see README), so details come from the user's own text.
-        ReelRepository(AppDatabase.create(this), ManualProvider, ai = ai)
+        // Tokenless Meta oEmbed on save: uses author / caption / thumbnail when Meta returns them, and otherwise the
+        // reel is kept for the user's own text (paste caption, screenshot, spoken words).
+        ReelRepository(AppDatabase.create(this), MetaOEmbedProvider(), ai = ai)
     }
 }
 
