@@ -42,7 +42,8 @@ class EmbedSafetyTest {
         assertTrue(page.contains("Content-Security-Policy"))
         assertTrue(page.contains("default-src 'none'"))
         assertEquals(1, Regex("<script", RegexOption.IGNORE_CASE).findAll(page).count())
-        assertTrue(page.contains("""<script async defer src="https://www.instagram.com/embed.js">"""))
+        assertTrue(page.contains("""<script async defer src="https://platform.instagram.com/en_US/embeds.js">"""))
+        assertTrue(page.contains("script-src https://www.instagram.com https://platform.instagram.com"))
         val facebook = EmbedHtml.page(Platform.FACEBOOK, """<div class="fb-video"></div>""")
         assertTrue(facebook.contains("https://connect.facebook.net/en_US/sdk.js"))
     }
