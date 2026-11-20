@@ -72,6 +72,9 @@ fun DetailScreen(
                 trailing = { if (title != reel.title) Text("Save", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onTitle(title) }) },
             )
             Text("${reel.creatorHandle ?: reel.platform.label} • ${item.folder?.name ?: "Inbox"}", color = ReelboxColors.Subtle, fontSize = 12.sp)
+            val metrics = listOfNotNull(reel.likes?.let { "$it likes" }, reel.comments?.let { "$it comments" }, reel.views?.let { "$it views" })
+            if (metrics.isNotEmpty()) Text(metrics.joinToString(" • "), color = ReelboxColors.Subtle, fontSize = 12.sp)
+            reel.audioName?.let { Text(it, color = ReelboxColors.Subtle, fontSize = 12.sp) }
             if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
             if (reel.caption.isNotBlank()) {
                 var expanded by remember(reel.id) { mutableStateOf(false) }
@@ -90,7 +93,7 @@ fun DetailScreen(
                 ) {
                     Text("Saved. Now add the details", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
-                        "Instagram doesn't let apps read a reel's caption from its link, so give Reelbox the text once. It then adds the title, tags and folder for you.",
+                        "If the public preview does not supply a caption, add text and Reelbox can organise it for you.",
                         fontSize = 13.sp, lineHeight = 19.sp, color = ReelboxColors.Muted,
                     )
                     PasteCaptionButton(onPasteCaption)
