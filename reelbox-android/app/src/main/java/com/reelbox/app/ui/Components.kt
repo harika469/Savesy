@@ -46,7 +46,7 @@ import com.reelbox.app.data.ReelWithFolder
 
 /** Thumbnail from oEmbed, or a gradient with the folder emoji when there is none (or it can't load). */
 @Composable
-fun ReelThumb(item: ReelWithFolder, height: Dp, modifier: Modifier = Modifier) {
+fun ReelThumb(item: ReelWithFolder, height: Dp, modifier: Modifier = Modifier, topBadge: String? = null) {
     val reel = item.reel
     Box(modifier.fillMaxWidth().height(height).background(ReelboxColors.gradientFor(reel.id)), contentAlignment = Alignment.Center) {
         Text(item.folder?.emoji ?: "🎬", fontSize = 32.sp)
@@ -60,7 +60,15 @@ fun ReelThumb(item: ReelWithFolder, height: Dp, modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
                 .background(Color.Black.copy(alpha = 0.6f), CircleShape).padding(horizontal = 7.dp, vertical = 3.dp),
         )
-        if (reel.status != ReelStatus.NEW) {
+        if (topBadge != null) {
+            Text(
+                topBadge,
+                color = Color.White,
+                fontSize = 11.sp,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(horizontal = 7.dp, vertical = 3.dp),
+            )
+        } else if (reel.status != ReelStatus.NEW) {
             Text(
                 reel.status.label,
                 color = Color.White,
@@ -84,7 +92,7 @@ fun TagPills(tags: List<String>, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ReelCard(item: ReelWithFolder, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ReelCard(item: ReelWithFolder, onClick: () -> Unit, modifier: Modifier = Modifier, topBadge: String? = null) {
     val reel = item.reel
     Card(
         onClick = onClick,
@@ -94,7 +102,7 @@ fun ReelCard(item: ReelWithFolder, onClick: () -> Unit, modifier: Modifier = Mod
         colors = CardDefaults.cardColors(containerColor = Color.White),
     ) {
         Column {
-            ReelThumb(item, 170.dp)
+            ReelThumb(item, 170.dp, topBadge = topBadge)
             Column(Modifier.padding(10.dp)) {
                 Text(reel.title, fontSize = 14.sp, fontWeight = FontWeight.Bold, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val who = reel.creatorHandle ?: reel.platform.label
@@ -257,4 +265,30 @@ fun PasteCaptionLink(onPaste: (String) -> Unit, modifier: Modifier = Modifier) {
         )
         Text("Copy the caption in Instagram, then tap here for the full, exact text. It makes the whole caption searchable.", fontSize = 12.sp, color = ReelboxColors.Subtle)
     }
+}
+
+/** Big "Paste caption" button for the first-step card on an empty reel. */
+@Composable
+fun PasteCaptionButton(onPaste: (String) -> Unit, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    PinkButton("\uD83D\uDCCB Paste the caption I copied", {
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        if (text.isBlank()) android.widget.Toast.makeText(context, "Nothing copied yet. In Instagram, tap the caption, long-press it and choose Copy.", android.widget.Toast.LENGTH_LONG).show()
+        else onPaste(text)
+    }, modifier)
+}
+
+/** Outlined "Use a screenshot" button (up to 5 images) for the first-step card. */
+@Composable
+fun ScreenshotButton(onPicked: (List<android.net.Uri>) -> Unit, modifier: Modifier = Modifier) {
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5),
+    ) { uris -> if (uris.isNotEmpty()) onPicked(uris) }
+    Box(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.5.dp, ReelboxColors.Pink, RoundedCornerShape(12.dp))
+            .clickable { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+            .padding(10.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text("\uD83D\uDCF7 Use a screenshot of the reel", color = ReelboxColors.Pink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
 }

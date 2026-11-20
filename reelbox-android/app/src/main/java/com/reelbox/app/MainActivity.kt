@@ -33,7 +33,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.reelbox.app.ui.DetailScreen
 import com.reelbox.app.ui.DetailViewModel
+import com.reelbox.app.ui.HomeActions
 import com.reelbox.app.ui.HomeScreen
+import com.reelbox.app.ui.HomeWebScreen
+import com.reelbox.app.ui.webViewAvailable
 import com.reelbox.app.ui.HomeViewModel
 import com.reelbox.app.ui.PillField
 import com.reelbox.app.ui.ReelboxTheme
@@ -81,22 +84,38 @@ private fun HomeRoute(onOpen: (Long) -> Unit, vm: HomeViewModel) {
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.message.value = null } }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        HomeScreen(
-            state = state,
-            onQuery = vm::setQuery,
-            onSelectFolder = vm::selectFolder,
-            onOpen = onOpen,
-            clipboardLink = clipboardLink,
-            onSaveClipboard = { vm.saveClipboard(onOpen) },
-            onDismissClipboard = vm::dismissClipboard,
-            onAddByLink = { adding = true },
-            onOpenInstagram = {
-                val launch = context.packageManager.getLaunchIntentForPackage("com.instagram.android")
-                    ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com"))
-                try { context.startActivity(launch) } catch (_: ActivityNotFoundException) { /* nothing to open */ }
-            },
-            contentPadding = padding,
-        )
+        val openInstagram = {
+            val launch = context.packageManager.getLaunchIntentForPackage("com.instagram.android")
+                ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com"))
+            try { context.startActivity(launch) } catch (_: ActivityNotFoundException) { /* nothing to open */ }
+        }
+        val sampleToast = { android.widget.Toast.makeText(context, "This is a sample. Share a reel from Instagram to add your own.", android.widget.Toast.LENGTH_SHORT).show() }
+        if (webViewAvailable()) {
+            HomeWebScreen(
+                state = state,
+                clipboardLink = clipboardLink,
+                actions = HomeActions(
+                    onQuery = vm::setQuery, onSelectFolder = vm::selectFolder, onOpen = onOpen,
+                    onSaveClipboard = { vm.saveClipboard(onOpen) }, onDismissClipboard = vm::dismissClipboard,
+                    onAddByLink = { adding = true }, onOpenInstagram = openInstagram, onSampleClick = sampleToast,
+                ),
+                contentPadding = padding,
+            )
+        } else {
+            HomeScreen(
+                state = state,
+                onQuery = vm::setQuery,
+                onSelectFolder = vm::selectFolder,
+                onOpen = onOpen,
+                clipboardLink = clipboardLink,
+                onSaveClipboard = { vm.saveClipboard(onOpen) },
+                onDismissClipboard = vm::dismissClipboard,
+                onAddByLink = { adding = true },
+                onOpenInstagram = openInstagram,
+                onSampleClick = sampleToast,
+                contentPadding = padding,
+            )
+        }
     }
     if (adding) {
         AlertDialog(

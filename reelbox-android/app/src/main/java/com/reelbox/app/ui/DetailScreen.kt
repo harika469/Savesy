@@ -1,5 +1,7 @@
 package com.reelbox.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -74,13 +76,20 @@ fun DetailScreen(
             }
             if (reel.tagList.isNotEmpty()) TagPills(reel.tagList)
 
-            if (reel.enrichState == EnrichState.MANUAL && reel.note.isBlank()) {
+            if (reel.caption.isBlank() && reel.note.isBlank()) {
                 Column(
-                    Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().background(ReelboxColors.NoteBg, RoundedCornerShape(12.dp))
+                        .border(1.dp, ReelboxColors.NoteBorder, RoundedCornerShape(12.dp)).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("What is this reel about?", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text("Say a few words, or type them. Reelbox adds a title and tags and files it for you.", fontSize = 13.sp, color = ReelboxColors.Subtle)
+                    Text("Saved. Now add the details", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(
+                        "Instagram doesn't let apps read a reel's caption from its link, so give Reelbox the text once. It then adds the title, tags and folder for you.",
+                        fontSize = 13.sp, lineHeight = 19.sp, color = ReelboxColors.Muted,
+                    )
+                    PasteCaptionButton(onPasteCaption)
+                    ScreenshotButton(onScreenshot)
+                    Text("or say / type a few words about it", fontSize = 12.sp, color = ReelboxColors.Subtle)
                     DescribeBox(onDescribe)
                 }
             }

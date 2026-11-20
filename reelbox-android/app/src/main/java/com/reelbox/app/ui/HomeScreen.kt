@@ -64,6 +64,7 @@ fun HomeScreen(
     onDismissClipboard: () -> Unit = {},
     onAddByLink: () -> Unit = {},
     onOpenInstagram: () -> Unit = {},
+    onSampleClick: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     val full = GridItemSpan(2)
@@ -105,10 +106,20 @@ fun HomeScreen(
                 }
             }
         }
-        if (state.reels.isEmpty()) {
+        val showSamples = state.allCount == 0 && state.query.isBlank() && state.selectedFolderId == null
+        if (showSamples) {
             item(span = { full }) {
                 Text(
-                    if (state.allCount == 0) "Nothing saved yet. Share any reel to Reelbox to start." else "No reels match that.",
+                    "Sample reels. Yours will appear here once you share one.",
+                    color = ReelboxColors.Subtle, fontSize = 12.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            items(SampleReels.items, key = { it.reel.id }) { item -> ReelCard(item, onClick = onSampleClick, topBadge = "Sample") }
+        } else if (state.reels.isEmpty()) {
+            item(span = { full }) {
+                Text(
+                    "No reels match that.",
                     color = ReelboxColors.Subtle, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                 )

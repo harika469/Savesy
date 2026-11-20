@@ -27,6 +27,7 @@ import com.reelbox.app.ui.HomeState
 import com.reelbox.app.ui.ReelboxTheme
 import com.reelbox.app.ui.statsOf
 import com.reelbox.app.ui.visibleFolders
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -82,6 +83,12 @@ class ScreenshotTest {
     @Test fun homeEmpty() {
         rule.setContent { Frame { HomeScreen(HomeState(emptyList(), 0, 0, visibleFolders(folders, emptyList()), null, ""), {}, {}, {}, clipboardLink = "https://www.instagram.com/reel/DfHfFlIhjUI/") } }
         save("home-empty")
+    }
+
+    @Test fun sampleReelsNeverCountAsSaved() {
+        assertEquals(6, com.reelbox.app.ui.SampleReels.items.size)
+        assertEquals(true, com.reelbox.app.ui.SampleReels.items.all { com.reelbox.app.ui.SampleReels.isSample(it.reel.id) })
+        assertEquals(false, com.reelbox.app.ui.SampleReels.isSample(1))
     }
 
     @Test fun detail() {

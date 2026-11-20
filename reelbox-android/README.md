@@ -119,3 +119,14 @@ Automated tests cover the logic (106), but nothing has run on a device or emulat
 4. Tapping the creator name or "View more" opens the browser, not the WebView.
 5. A removed or private post shows the unavailable message and the reel keeps its notes.
 6. Share a reel from Instagram: Reelbox appears in the share sheet (scroll or tap More).
+
+## Home screen = the Reelbox HTML design
+
+The home screen is the shared Reelbox HTML/CSS, bundled in `app/src/main/assets/` (`reelbox_home.html` carries the design's CSS
+unchanged; `reelbox_home.js` fills it with the app's data). It runs in a locked-down WebView: served from a private
+https origin by `WebViewAssetLoader` (no file access), a strict Content-Security-Policy, every request to any other
+host blocked, and all text inserted with `textContent` so captions can never inject markup. With identical data, the
+page renders pixel-for-pixel the same as the original HTML (0 differing pixels in a Chromium comparison, top of
+page to the end of the card grid). Buttons and cards call the app through a small `Reelbox` bridge. If a phone has no
+system WebView, the app falls back to the native Compose home screen. While the library is empty the page shows six
+labelled sample reels (never saved or counted). Detail, share card and dialogs stay native Compose.
