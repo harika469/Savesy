@@ -2,66 +2,62 @@ package com.reelbox.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.reelbox.app.data.FolderEntity
-import com.reelbox.app.data.NOTE_LIMIT
 import com.reelbox.app.domain.Confidence
 
 sealed interface CaptureUi {
     data object Saving : CaptureUi
-    data class Saved(val folder: FolderEntity?, val confidence: Confidence?, val pending: Boolean, val manual: Boolean) : CaptureUi
+    data class Saved(
+        val folder: FolderEntity?,
+        val confidence: Confidence?,
+        val pending: Boolean,
+        val manual: Boolean,
+        val described: Boolean = false,
+    ) : CaptureUi
     data class Duplicate(val folder: FolderEntity?) : CaptureUi
     data object Invalid : CaptureUi
 }
 
-/** The "Saved to Recipes" card shown over Instagram/Facebook after Share → Reelbox. */
+/** The card shown over Instagram/Facebook after Share → Reelbox. */
 @Composable
 fun CaptureSheet(
     state: CaptureUi,
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
-    onNote: (String) -> Unit,
+    onDescribe: (String) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {
     Surface(shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 12.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when (state) {
                 CaptureUi.Saving -> Text("Saving…", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 CaptureUi.Invalid -> {
                     Text("That doesn't look like a reel link", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Reelbox saves Instagram and Facebook reels. Try sharing the reel's link.", color = ReelboxColors.Subtle)
-                    Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                    Text("Reelbox saves Instagram and Facebook reels. Try sharing the reel's link.", color = ReelboxColors.Subtle, fontSize = 14.sp)
+                    PinkButton("Close", onDone)
                 }
                 is CaptureUi.Duplicate -> {
                     Text("Already saved in ${state.folder?.name ?: "Inbox"}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onDone) { Text("Done") }
-                        Button(onClick = onOpenApp, colors = ButtonDefaults.buttonColors(containerColor = ReelboxColors.Pink)) { Text("Open Reelbox") }
-                    }
+                    PinkButton("Open Reelbox", onOpenApp)
+                    Text("Done", color = ReelboxColors.Subtle, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onDone).padding(vertical = 6.dp))
                 }
-                is CaptureUi.Saved -> SavedBody(state, folders, onChangeFolder, onNote, onOpenApp, onDone)
+                is CaptureUi.Saved -> SavedBody(state, folders, onChangeFolder, onDescribe, onOpenApp, onDone)
             }
         }
     }
@@ -72,42 +68,24 @@ private fun SavedBody(
     state: CaptureUi.Saved,
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
-    onNote: (String) -> Unit,
+    onDescribe: (String) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {
-    var menu by remember { mutableStateOf(false) }
-    var addNote by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("") }
     val where = state.folder?.name ?: "Inbox"
     val detail = when {
-        state.pending -> "No connection: details will be added when you're online"
-        state.manual -> "Couldn't read this reel (private?). Add a note yourself"
-        state.confidence == Confidence.HIGH -> "Filed automatically"
-        state.confidence == Confidence.LOW -> "Not sure about this folder: change it if needed"
-        else -> "Fetching details…"
+        state.described && state.confidence == Confidence.HIGH -> "Organised from what you said"
+        state.described -> "Not sure about this folder: change it below if needed"
+        else -> "Tell Reelbox what it is so it can add tags and file it"
     }
     Text("Saved to $where", fontSize = 18.sp, fontWeight = FontWeight.Bold)
     Text(detail, color = ReelboxColors.Subtle, fontSize = 13.sp)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column {
-            OutlinedButton(onClick = { menu = true }) { Text("Change folder") }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                folders.forEach { f -> DropdownMenuItem(text = { Text("${f.emoji} ${f.name}") }, onClick = { menu = false; onChangeFolder(f.id) }) }
-            }
-        }
-        OutlinedButton(onClick = { addNote = !addNote }) { Text("Add note") }
+    DescribeBox(onDescribe)
+    Text("Move to", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(folders, key = { it.id }) { f -> FolderChip("${f.emoji} ${f.name}", state.folder?.id == f.id) { onChangeFolder(f.id) } }
     }
-    if (addNote) {
-        OutlinedTextField(
-            value = note,
-            onValueChange = { if (it.length <= NOTE_LIMIT) { note = it; onNote(it) } },
-            placeholder = { Text("Why did you save it?") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onDone, colors = ButtonDefaults.buttonColors(containerColor = ReelboxColors.Pink)) { Text("Done") }
-        TextButton(onClick = onOpenApp) { Text("Open Reelbox") }
-    }
+    PinkButton("Done", onDone)
+    Text("Open Reelbox", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenApp).padding(vertical = 4.dp))
 }

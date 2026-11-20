@@ -2,20 +2,17 @@ package com.reelbox.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,8 +23,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.reelbox.app.data.EnrichState
 import com.reelbox.app.data.FolderEntity
 import com.reelbox.app.data.NOTE_LIMIT
 import com.reelbox.app.data.ReelStatus
@@ -43,67 +42,67 @@ fun DetailScreen(
     onMove: (Long) -> Unit,
     onNote: (String) -> Unit,
     onTitle: (String) -> Unit,
+    onDescribe: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
-    var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var note by remember(reel.id) { mutableStateOf(reel.note) }
     var title by remember(reel.id) { mutableStateOf(reel.title) }
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-        ReelThumb(item, 260.dp)
+        ReelThumb(item, 220.dp)
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (reel.isUnavailable) {
-                Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
-            }
-            if (reel.enrichState == com.reelbox.app.data.EnrichState.MANUAL) {
-                Text("Private or unavailable reel: add a title and note yourself.", color = ReelboxColors.Subtle, fontSize = 13.sp)
-            }
-            OutlinedTextField(
+            PillField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title") },
-                modifier = Modifier.fillMaxWidth(),
-                trailingIcon = { if (title != reel.title) TextButton(onClick = { onTitle(title) }) { Text("Save") } },
+                placeholder = "Title",
+                trailing = { if (title != reel.title) Text("Save", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onTitle(title) }) },
             )
-            Text("${reel.creatorHandle ?: reel.platform.label} • ${item.folder?.name ?: "Inbox"}", color = ReelboxColors.Subtle, fontSize = 13.sp)
+            Text("${reel.creatorHandle ?: reel.platform.label} • ${item.folder?.name ?: "Inbox"}", color = ReelboxColors.Subtle, fontSize = 12.sp)
+            if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
             if (reel.caption.isNotBlank()) Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp)
             if (reel.tagList.isNotEmpty()) TagPills(reel.tagList)
 
-            Text("Status", fontWeight = FontWeight.Bold)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (reel.enrichState == EnrichState.MANUAL && reel.note.isBlank()) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("What is this reel about?", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("Say a few words, or type them. Reelbox adds a title and tags and files it for you.", fontSize = 13.sp, color = ReelboxColors.Subtle)
+                    DescribeBox(onDescribe)
+                }
+            }
+
+            Text("Status", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(ReelStatus.TO_TRY, ReelStatus.TRIED, ReelStatus.DONE, ReelStatus.ARCHIVED).forEach { status ->
                     FolderChip(status.label, reel.status == status) { onStatus(if (reel.status == status) ReelStatus.NEW else status) }
                 }
             }
 
-            Text("Folder", fontWeight = FontWeight.Bold)
-            Column {
-                OutlinedButton(onClick = { menu = true }) { Text("${item.folder?.emoji ?: ""} ${item.folder?.name ?: "Inbox"} ▾") }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    folders.forEach { folder ->
-                        DropdownMenuItem(text = { Text("${folder.emoji} ${folder.name}") }, onClick = { menu = false; onMove(folder.id) })
-                    }
+            Text("Folder", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(folders, key = { it.id }) { folder ->
+                    FolderChip("${folder.emoji} ${folder.name}", item.folder?.id == folder.id) { onMove(folder.id) }
                 }
             }
 
-            OutlinedTextField(
+            Text("Note", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            PillField(
                 value = note,
                 onValueChange = { if (it.length <= NOTE_LIMIT) { note = it; onNote(it) } },
-                label = { Text("Note") },
-                supportingText = { Text("${note.length}/$NOTE_LIMIT") },
-                placeholder = { Text("e.g. Try Sunday") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
+                placeholder = "e.g. Try Sunday",
+                singleLine = false,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.padding(bottom = 0.dp),
             )
+            Text("${note.length}/$NOTE_LIMIT", fontSize = 12.sp, color = ReelboxColors.Subtle, textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth())
 
-            Button(
-                onClick = onOpenOriginal,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = ReelboxColors.Pink),
-            ) { Text("Open in ${reel.platform.label}") }
-            TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete", color = Color(0xFFB91C1C)) }
+            PinkButton("Open in ${reel.platform.label}", onOpenOriginal)
+            Text("Delete", color = Color(0xFFB91C1C), fontSize = 14.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clickable { confirmDelete = true }.padding(vertical = 8.dp))
         }
     }
 

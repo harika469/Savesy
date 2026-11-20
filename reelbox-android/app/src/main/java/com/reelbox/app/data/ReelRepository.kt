@@ -52,7 +52,9 @@ class ReelRepository(
         }
         ensureSystemFolders()
         val inbox = folders.findByName(INBOX)!!
-        val hint = sharedText.replace(link.permalink, "").replace(UrlParser.extractUrl(sharedText) ?: "", "").trim()
+        // Anything the user shared besides the link (never the link's own tracking junk).
+        val rawUrl = UrlParser.extractUrl(sharedText)
+        val hint = if (rawUrl == null) "" else sharedText.replace(rawUrl, "").trim()
         val reel = ReelEntity(
             permalink = link.permalink,
             normalizedUrl = link.key,
@@ -100,7 +102,7 @@ class ReelRepository(
                 enrichState = EnrichState.ENRICHED,
             )
         }
-        val suggestion = Classifier.classify(updated.title, updated.caption)
+        val suggestion = Classifier.classify(updated.title, "${updated.caption} ${updated.note}")
         val target = folders.findByName(suggestion.folder)
         val inbox = folders.findByName(INBOX)
         // Only auto-move out of Inbox; never override a folder the user already chose.
@@ -108,6 +110,30 @@ class ReelRepository(
         val final = moved.copy(hashtags = (suggestion.tags).joinToString(",").ifEmpty { moved.hashtags })
         reels.update(final)
         return EnrichOutcome(final, folders.getAll().firstOrNull { it.id == final.folderId }, suggestion)
+    }
+
+    /**
+     * "Say something and we organise it": the user's words (spoken or typed) become the note and title,
+     * the classifier files the reel, and tags are added. Never overrides a folder the user chose.
+     */
+    suspend fun describe(reelId: Long, text: String): EnrichOutcome? {
+        val reel = reels.get(reelId) ?: return null
+        val said = text.trim().ifEmpty { return null }
+        val note = (if (reel.note.isBlank()) said else reel.note + "\n" + said).take(NOTE_LIMIT)
+        val title = if (reel.title == "${reel.platform.label} reel") deriveTitle(said) else reel.title
+        val suggestion = Classifier.classify(title, "${reel.caption} $note")
+        val inbox = folders.findByName(INBOX)
+        val target = folders.findByName(suggestion.folder)
+        val folderId = if (inbox != null && reel.folderId == inbox.id && target != null && suggestion.folder != INBOX) target.id else reel.folderId
+        val tags = (reel.tagList + suggestion.tags).distinct().take(5)
+        val updated = reel.copy(title = title, note = note, folderId = folderId, hashtags = tags.joinToString(","))
+        reels.update(updated)
+        return EnrichOutcome(updated, folders.getAll().firstOrNull { it.id == updated.folderId }, suggestion)
+    }
+
+    suspend fun isSaved(sharedText: String): Boolean {
+        val link = UrlParser.parse(sharedText) ?: return false
+        return reels.findByKey(link.key) != null
     }
 
     /** Offline queue: retry reels that were saved without a connection. */
@@ -129,3 +155,10 @@ class ReelRepository(
 }
 
 val Suggestion.isConfident: Boolean get() = confidence == Confidence.HIGH
+
+/** First sentence of what the user said, capitalised and kept short enough for a card title. */
+fun deriveTitle(said: String): String {
+    val first = said.trim().split(Regex("[.!?\\n]")).first().trim()
+    val short = if (first.length > 60) first.take(60).substringBeforeLast(' ', first.take(60)).trimEnd(',', ' ') + "…" else first
+    return short.replaceFirstChar { it.uppercase() }.ifEmpty { "Saved reel" }
+}

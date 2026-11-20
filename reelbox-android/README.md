@@ -34,14 +34,16 @@ Screens are rendered to `app/build/screenshots/*.png` by `ScreenshotTest` (no de
 Reminders and weekly digest, accounts and Supabase sync, export / delete-my-data, settings, custom and
 sub-folders, collections, affiliate "Act on this" cards (planned for month 3), Facebook/Instagram dedupe merge.
 
-## Enrichment (creator, caption, thumbnail)
+## Getting details for a reel (creator, caption, tags)
 
-`MetaOEmbedEnricher` calls Meta's oEmbed endpoints (`instagram_oembed`, `oembed_video`) straight from the
-phone, with **no access token, no Meta app and no backend**. Meta lifted the token and App Review
-requirement for public content in June 2026; the limit is 1,000 requests per endpoint per hour per caller.
+Tested on 20 Nov 2026: Meta's oEmbed works **without a token** (HTTP 200) but returns only an embed
+placeholder (`html` saying "View this post on Instagram"): no title, author, caption or thumbnail. Reading
+Instagram's pages directly would be scraping, which the handover rules out. So the app does this instead:
 
-- Private or deleted reels return an error, and the reel is kept as a manual card (title + note).
-- Rate limit, outages and no network keep the reel pending; it is retried on the next app start.
-- **Not yet verified against the live API**: what fields Meta returns today (caption, thumbnail) and whether
-  Facebook *reels* work through `oembed_video`. Check with a real public reel before relying on it.
-- Higher volume later: a token with App Review allows up to 5M requests/day, which would need a small server.
+1. **Share → Reelbox** (or copy the link and open the app: a "Reel link copied. Save it?" card appears) saves the
+   link to Inbox straight away.
+2. The user **says or types a few words** about it. Voice uses the phone's built-in speech recognition (no
+   microphone permission). Reelbox makes a title, up to 5 tags and files it into a folder with the rules classifier.
+
+`MetaOEmbedEnricher` is kept (and tested) for when a Meta token with oEmbed Read access exists, which does return
+author and thumbnail; switch it on in `ReelboxApp.kt`. Facebook reels via `oembed_video` were not tested.

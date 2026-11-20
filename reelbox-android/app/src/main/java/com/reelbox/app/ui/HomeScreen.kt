@@ -1,7 +1,10 @@
 package com.reelbox.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,10 +16,8 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,26 +27,30 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.reelbox.app.data.FolderEntity
-import com.reelbox.app.data.ReelStatus
 import com.reelbox.app.data.ReelWithFolder
 
 data class HomeState(
     val reels: List<ReelWithFolder>,
     val allCount: Int,
     val thisWeek: Int,
-    val untried: Int,
     val folders: List<FolderEntity>,
     val selectedFolderId: Long?,
     val query: String,
 )
 
-fun statsOf(all: List<ReelWithFolder>, nowMillis: Long): Triple<Int, Int, Int> {
+private val hideWhenEmpty = setOf("Inbox", "Motivation")
+private val folderOrder = listOf("Recipes", "Travel", "Fashion", "Home", "To Try", "Motivation", "Inbox")
+
+/** Same chips as the mockup (Recipes, Travel, Fashion, Home, To Try); Inbox / Motivation only appear once used. */
+fun visibleFolders(all: List<FolderEntity>, reels: List<ReelWithFolder>): List<FolderEntity> {
+    val used = reels.map { it.reel.folderId }.toSet()
+    return all.filter { it.name !in hideWhenEmpty || it.id in used }
+        .sortedBy { folderOrder.indexOf(it.name).let { i -> if (i < 0) folderOrder.size else i } }
+}
+
+fun statsOf(all: List<ReelWithFolder>, nowMillis: Long): Pair<Int, Int> {
     val weekAgo = nowMillis - 7L * 24 * 3600 * 1000
-    return Triple(
-        all.size,
-        all.count { it.reel.createdAt >= weekAgo },
-        all.count { it.reel.status == ReelStatus.NEW || it.reel.status == ReelStatus.TO_TRY },
-    )
+    return all.size to all.count { it.reel.createdAt >= weekAgo }
 }
 
 @Composable
@@ -54,6 +59,11 @@ fun HomeScreen(
     onQuery: (String) -> Unit,
     onSelectFolder: (Long?) -> Unit,
     onOpen: (Long) -> Unit,
+    clipboardLink: String? = null,
+    onSaveClipboard: () -> Unit = {},
+    onDismissClipboard: () -> Unit = {},
+    onAddByLink: () -> Unit = {},
+    onOpenInstagram: () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(0.dp),
 ) {
     val full = GridItemSpan(2)
@@ -63,36 +73,28 @@ fun HomeScreen(
         contentPadding = PaddingValues(
             start = 16.dp, end = 16.dp,
             top = contentPadding.calculateTopPadding() + 16.dp,
-            bottom = contentPadding.calculateBottomPadding() + 96.dp,
+            bottom = contentPadding.calculateBottomPadding() + 80.dp,
         ),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { full }) {
-            androidx.compose.foundation.layout.Column {
+            Column {
                 Text("📦 Reelbox", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text("Your saved reels, finally organised", fontSize = 14.sp, color = ReelboxColors.Muted)
             }
         }
+        if (clipboardLink != null) {
+            item(span = { full }) { ClipboardBanner(clipboardLink, onSaveClipboard, onDismissClipboard) }
+        }
         item(span = { full }) {
-            TextField(
-                value = state.query,
-                onValueChange = onQuery,
-                singleLine = true,
-                placeholder = { Text("Search saved reels... e.g. paneer, Amsterdam, hair", fontSize = 15.sp, color = Color(0xFF8A8A8A), maxLines = 1) },
-                shape = CircleShape,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = ReelboxColors.SearchBg, unfocusedContainerColor = ReelboxColors.SearchBg,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier.fillMaxWidth().border(1.dp, ReelboxColors.SearchBorder, CircleShape).testTag("search"),
-            )
+            PillField(state.query, onQuery, "Search saved reels... e.g. paneer, Amsterdam, hair", Modifier.testTag("search"))
         }
         item(span = { full }) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile(state.allCount, "Saved", Modifier.weight(1f))
+                StatTile(state.folders.size, "Folders", Modifier.weight(1f))
                 StatTile(state.thisWeek, "This week", Modifier.weight(1f))
-                StatTile(state.untried, "Untried", Modifier.weight(1f))
             }
         }
         item(span = { full }) {
@@ -115,8 +117,33 @@ fun HomeScreen(
             items(state.reels, key = { it.reel.id }) { item -> ReelCard(item, onClick = { onOpen(item.reel.id) }) }
         }
         item(span = { full }) { HowItWorksNote(Modifier.padding(top = 2.dp)) }
+        item(span = { full }) { PinkButton("Open Instagram to try Share → Reelbox", onOpenInstagram) }
+        item(span = { full }) {
+            Text(
+                "+ Add a reel link",
+                color = ReelboxColors.Pink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onAddByLink).padding(vertical = 4.dp),
+            )
+        }
         item(span = { full }) {
             Text("Reelbox • Works offline", fontSize = 12.sp, color = Color(0xFF888888), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** "You copied a reel link. Save it?" A fallback for when the share sheet isn't convenient. */
+@Composable
+fun ClipboardBanner(link: String, onSave: () -> Unit, onDismiss: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().background(ReelboxColors.NoteBg, RoundedCornerShape(12.dp))
+            .border(1.dp, ReelboxColors.NoteBorder, RoundedCornerShape(12.dp)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Reel link copied", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Text(link.removePrefix("https://").removePrefix("www.").take(48), fontSize = 13.sp, color = ReelboxColors.Muted, maxLines = 1)
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Save to Reelbox", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.clickable(onClick = onSave))
+            Text("Not now", color = ReelboxColors.Subtle, fontSize = 14.sp, modifier = Modifier.clickable(onClick = onDismiss))
         }
     }
 }

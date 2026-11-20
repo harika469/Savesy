@@ -133,4 +133,59 @@ class ReelRepositoryTest {
         assertEquals(0, repo.observeReels().first().size)
         assertNotNull(capture("https://www.instagram.com/reel/AAA111/"))
     }
+
+    @Test fun trackingParametersNeverEndUpAsTheCaption() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/?knvt=MXVlMnI0b3I1eXkzMw==")
+        assertEquals("", saved.reel.caption)
+        assertEquals("", saved.reel.hashtags)
+        val withText = capture("Look at this #recipe https://www.instagram.com/reel/ZZZ999/?igsh=abc")
+        assertEquals("Look at this #recipe", withText.reel.caption)
+        assertEquals("recipe", withText.reel.hashtags)
+    }
+
+    @Test fun describeTurnsWordsIntoTitleTagsAndFolder() = runBlocking {
+        enricher.result = EnrichResult.Unavailable
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.enrich(saved.reel.id)
+        val out = repo.describe(saved.reel.id, "paneer butter masala recipe, want to cook this Sunday")!!
+        assertEquals("Recipes", out.folder?.name)
+        assertEquals("Paneer butter masala recipe, want to cook this Sunday", out.reel.title)
+        assertEquals("paneer butter masala recipe, want to cook this Sunday", out.reel.note)
+        assertTrue("recipe" in out.reel.tagList)
+        assertTrue(out.reel.tagList.size <= 5)
+    }
+
+    @Test fun describeNeverMovesAReelOutOfAFolderTheUserPicked() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        val travel = repo.getFolders().first { it.name == "Travel" }
+        repo.moveToFolder(saved.reel.id, travel.id)
+        assertEquals("Travel", repo.describe(saved.reel.id, "pasta recipe")!!.folder?.name)
+    }
+
+    @Test fun describeKeepsAnExistingTitleAndAppendsToTheNote() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.setTitle(saved.reel.id, "My title")
+        repo.setNote(saved.reel.id, "first")
+        val out = repo.describe(saved.reel.id, "second thought")!!
+        assertEquals("My title", out.reel.title)
+        assertEquals("first\nsecond thought", out.reel.note)
+    }
+
+    @Test fun describeIgnoresBlankText() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        assertEquals(null, repo.describe(saved.reel.id, "   "))
+    }
+
+    @Test fun deriveTitleIsShortAndCapitalised() {
+        assertEquals("Hidden cafe in amsterdam", com.reelbox.app.data.deriveTitle("hidden cafe in amsterdam. so good!"))
+        assertTrue(com.reelbox.app.data.deriveTitle("a ".repeat(80)).length <= 62)
+        assertEquals("Saved reel", com.reelbox.app.data.deriveTitle("   "))
+    }
+
+    @Test fun isSavedRecognisesTheSameReelInAnyUrlForm() = runBlocking {
+        capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        assertTrue(repo.isSaved("https://instagram.com/reels/DfHfFlIhjUI/?knvt=x"))
+        assertTrue(!repo.isSaved("https://www.instagram.com/reel/OTHER/"))
+        assertTrue(!repo.isSaved("not a link"))
+    }
 }

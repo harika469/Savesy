@@ -51,7 +51,15 @@ class ShareActivity : ComponentActivity() {
                         onChangeFolder = { folderId ->
                             reelId?.let { id -> lifecycleScope.launch { repo.moveToFolder(id, folderId); refresh(id) } }
                         },
-                        onNote = { text -> reelId?.let { id -> lifecycleScope.launch { repo.setNote(id, text) } } },
+                        onDescribe = { said ->
+                            reelId?.let { id ->
+                                lifecycleScope.launch {
+                                    repo.describe(id, said)?.let { outcome ->
+                                        ui.value = CaptureUi.Saved(outcome.folder, outcome.suggestion?.confidence, pending = false, manual = false, described = true)
+                                    }
+                                }
+                            }
+                        },
                         onOpenApp = {
                             startActivity(Intent(this@ShareActivity, MainActivity::class.java))
                             finish()

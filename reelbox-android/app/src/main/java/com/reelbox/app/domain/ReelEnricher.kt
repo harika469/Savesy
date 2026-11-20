@@ -57,9 +57,10 @@ suspend fun httpGet(url: String): HttpResult = withContext(Dispatchers.IO) {
 }
 
 /**
- * Meta's oEmbed endpoints, called straight from the phone. Since June 2026 they need no access token
- * and no App Review for public content (limit: 1,000 requests per endpoint per hour, counted per caller,
- * so each device gets its own allowance). Private, deleted or non-public reels come back as 4xx errors.
+ * Meta's oEmbed endpoints, called straight from the phone. Since June 2026 they work without an access
+ * token, but a tested call (Nov 2026) returned ONLY an embed placeholder, with no title, author or
+ * thumbnail, so this is currently not used by the app (see ReelboxApp). Kept for when a Meta token with
+ * oEmbed Read access is available, which does return those fields.
  */
 class MetaOEmbedEnricher(
     private val apiVersion: String = "v26.0",
@@ -81,13 +82,16 @@ class MetaOEmbedEnricher(
         val json = JSONObject(body)
         val author = json.optString("author_name").takeIf { it.isNotBlank() }
         val caption = json.optString("title").takeIf { it.isNotBlank() }
+        val thumbnail = json.optString("thumbnail_url").takeIf { it.isNotBlank() }
+        // Without a token Meta returns only an embed placeholder. No details means manual entry.
+        if (author == null && caption == null && thumbnail == null) return EnrichResult.Unavailable
         return EnrichResult.Success(
             Enrichment(
                 title = caption?.lineSequence()?.firstOrNull()?.take(120),
                 caption = caption,
                 creatorName = author,
                 creatorHandle = author?.let { "@" + it.removePrefix("@") },
-                thumbnailUrl = json.optString("thumbnail_url").takeIf { it.isNotBlank() },
+                thumbnailUrl = thumbnail,
             )
         )
     }

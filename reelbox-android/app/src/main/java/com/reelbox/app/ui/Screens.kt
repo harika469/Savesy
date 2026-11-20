@@ -10,6 +10,7 @@ import com.reelbox.app.data.ReelRepository
 import com.reelbox.app.data.ReelStatus
 import com.reelbox.app.data.ReelWithFolder
 import com.reelbox.app.domain.ReelSearch
+import com.reelbox.app.domain.UrlParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +25,29 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val message = MutableStateFlow<String?>(null)
 
     val state: StateFlow<HomeState> = combine(repo.observeReels(), repo.observeFolders(), query, selectedFolder) { all, folders, q, folderId ->
-        val (saved, week, untried) = statsOf(all, System.currentTimeMillis())
+        val (saved, week) = statsOf(all, System.currentTimeMillis())
         val shown = all.filter { (folderId == null || it.reel.folderId == folderId) && ReelSearch.matches(it, q) }
-        HomeState(shown, saved, week, untried, folders, folderId, q)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState(emptyList(), 0, 0, 0, emptyList(), null, ""))
+        HomeState(shown, saved, week, visibleFolders(folders, all), folderId, q)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeState(emptyList(), 0, 0, emptyList(), null, ""))
+
+    /** A reel link found on the clipboard that isn't saved yet (Android only lets the foreground app read it). */
+    val clipboardLink = MutableStateFlow<String?>(null)
+    private var dismissedClip: String? = null
+
+    fun checkClipboard(text: String?) {
+        viewModelScope.launch {
+            val usable = text?.takeIf { UrlParser.parse(it) != null && it != dismissedClip && !repo.isSaved(it) }
+            clipboardLink.value = usable
+        }
+    }
+
+    fun dismissClipboard() { dismissedClip = clipboardLink.value; clipboardLink.value = null }
+
+    fun saveClipboard(onSaved: (Long) -> Unit) {
+        val text = clipboardLink.value ?: return
+        dismissClipboard()
+        addByLink(text, onSaved)
+    }
 
     init {
         viewModelScope.launch {
@@ -39,15 +59,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun setQuery(value: String) { query.value = value }
     fun selectFolder(id: Long?) { selectedFolder.value = id }
 
-    fun addByLink(text: String) {
+    fun addByLink(text: String, onSaved: (Long) -> Unit = {}) {
         viewModelScope.launch {
             when (val result = repo.capture(text)) {
                 CaptureResult.Invalid -> message.value = "That doesn't look like an Instagram or Facebook reel link"
                 is CaptureResult.Duplicate -> message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
                 is CaptureResult.Saved -> {
-                    message.value = "Saved to Inbox"
-                    val outcome = repo.enrich(result.reel.id)
-                    outcome?.folder?.let { message.value = "Saved to ${it.name}" }
+                    repo.enrich(result.reel.id)
+                    onSaved(result.reel.id)
                 }
             }
         }
@@ -62,6 +81,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     fun status(id: Long, status: ReelStatus) = viewModelScope.launch { repo.setStatus(id, status) }
     fun move(id: Long, folderId: Long) = viewModelScope.launch { repo.moveToFolder(id, folderId) }
     fun note(id: Long, note: String) = viewModelScope.launch { repo.setNote(id, note) }
+    fun describe(id: Long, said: String) = viewModelScope.launch { repo.describe(id, said) }
     fun title(id: Long, title: String) = viewModelScope.launch { repo.setTitle(id, title) }
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
     fun delete(id: Long) = viewModelScope.launch { repo.delete(id) }

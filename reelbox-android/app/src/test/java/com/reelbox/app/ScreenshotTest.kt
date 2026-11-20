@@ -26,6 +26,7 @@ import com.reelbox.app.ui.HomeScreen
 import com.reelbox.app.ui.HomeState
 import com.reelbox.app.ui.ReelboxTheme
 import com.reelbox.app.ui.statsOf
+import com.reelbox.app.ui.visibleFolders
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -73,26 +74,32 @@ class ScreenshotTest {
     @Composable private fun Frame(content: @Composable () -> Unit) = ReelboxTheme { Box(Modifier.fillMaxSize().background(Color.White)) { content() } }
 
     @Test fun home() {
-        val (all, week, untried) = statsOf(reels, now)
-        rule.setContent { Frame { HomeScreen(HomeState(reels, all, week, untried, folders.drop(1), null, ""), {}, {}, {}) } }
+        val (all, week) = statsOf(reels, now)
+        rule.setContent { Frame { HomeScreen(HomeState(reels, all, week, visibleFolders(folders, reels), null, ""), {}, {}, {}) } }
         save("home")
     }
 
     @Test fun homeEmpty() {
-        rule.setContent { Frame { HomeScreen(HomeState(emptyList(), 0, 0, 0, folders.drop(1), null, ""), {}, {}, {}) } }
+        rule.setContent { Frame { HomeScreen(HomeState(emptyList(), 0, 0, visibleFolders(folders, emptyList()), null, ""), {}, {}, {}, clipboardLink = "https://www.instagram.com/reel/DfHfFlIhjUI/") } }
         save("home-empty")
     }
 
     @Test fun detail() {
-        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}) } }
+        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}, {}) } }
         save("detail")
+    }
+
+    @Test fun detailManual() {
+        val manual = reels[1].let { it.copy(reel = it.reel.copy(title = "Instagram reel", creatorHandle = null, caption = "", hashtags = "", enrichState = EnrichState.MANUAL, folderId = f("Inbox").id), folder = f("Inbox")) }
+        rule.setContent { Frame { DetailScreen(manual, folders, {}, {}, {}, {}, {}, {}, {}) } }
+        save("detail-manual")
     }
 
     @Test fun captureSheet() {
         rule.setContent {
             Frame {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.BottomCenter) {
-                    CaptureSheet(CaptureUi.Saved(f("Recipes"), Confidence.HIGH, pending = false, manual = false), folders, {}, {}, {}, {})
+                    CaptureSheet(CaptureUi.Saved(f("Inbox"), null, pending = false, manual = true), folders, {}, {}, {}, {})
                 }
             }
         }

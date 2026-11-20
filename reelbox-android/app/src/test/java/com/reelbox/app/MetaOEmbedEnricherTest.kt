@@ -65,4 +65,10 @@ class MetaOEmbedEnricherTest {
     @Test fun garbageBodyIsUnavailableNotACrash() = runBlocking {
         assertEquals(EnrichResult.Unavailable, enricher(HttpResult(200, "<html>nope</html>")).enrich(ig))
     }
+
+    @Test fun tokenlessShellWithNoDetailsMeansManualEntry() = runBlocking {
+        // What Meta really returned for a public reel without a token (Nov 2026): only an embed placeholder.
+        val shell = """{"version":"1.0","provider_name":"Instagram","provider_url":"https://www.instagram.com/","type":"rich","width":658,"html":"<blockquote>View this post on Instagram</blockquote>"}"""
+        assertEquals(EnrichResult.Unavailable, enricher(HttpResult(200, shell)).enrich(ig))
+    }
 }

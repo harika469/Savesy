@@ -1,6 +1,16 @@
 package com.reelbox.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,7 +141,7 @@ fun HowItWorksNote(modifier: Modifier = Modifier) {
         Text("How it works:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         listOf(
             "1. In Instagram or Facebook tap Share → Reelbox",
-            "2. Reelbox saves the link and fetches creator & caption",
+            "2. Say a few words about it. Reelbox turns them into tags",
             "3. It auto-files into Recipes / Travel / Fashion etc.",
             "4. Search later instead of scrolling saved!",
         ).forEach { Text(it, fontSize = 13.sp, lineHeight = 20.sp) }
@@ -140,3 +150,74 @@ fun HowItWorksNote(modifier: Modifier = Modifier) {
 
 @Composable
 fun SectionGap(height: Dp = 12.dp) = Box(Modifier.height(height))
+
+/** Rounded grey input exactly like the mockup's search box (pill) or a taller rounded box for notes. */
+@Composable
+fun PillField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true,
+    shape: Shape = CircleShape,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier.fillMaxWidth().clip(shape).background(ReelboxColors.SearchBg)
+            .border(1.dp, ReelboxColors.SearchBorder, shape).padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) Text(placeholder, color = Color(0xFF8A8A8A), fontSize = 15.sp, maxLines = if (singleLine) 1 else 3)
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = singleLine,
+                textStyle = TextStyle(fontSize = 15.sp, color = ReelboxColors.Ink),
+                cursorBrush = SolidColor(ReelboxColors.Ink),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        trailing?.invoke()
+    }
+}
+
+/** The mockup's pink full-width button. */
+@Composable
+fun PinkButton(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(ReelboxColors.Pink)
+            .clickable(onClick = onClick).padding(10.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+fun MicButton(onClick: () -> Unit) {
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).background(ReelboxColors.Pink).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text("🎤", fontSize = 16.sp) }
+}
+
+/**
+ * "Say something and we organise it". Speak (mic) or type, then Reelbox turns the words into a title,
+ * tags and a folder.
+ */
+@Composable
+fun DescribeBox(onSubmit: (String) -> Unit, modifier: Modifier = Modifier, placeholder: String = "Say or type what it is, e.g. paneer recipe to try Sunday") {
+    var text by remember { mutableStateOf("") }
+    val speak = rememberVoiceInput { spoken -> onSubmit(spoken) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        PillField(
+            value = text,
+            onValueChange = { text = it },
+            placeholder = placeholder,
+            trailing = { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (text.isNotBlank()) Text("Organise", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+                    modifier = Modifier.clickable { onSubmit(text); text = "" })
+                MicButton(speak)
+            } },
+        )
+    }
+}
