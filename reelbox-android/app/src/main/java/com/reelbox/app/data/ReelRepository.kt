@@ -120,6 +120,10 @@ class ReelRepository(
                 creatorName = reel.creatorName ?: result.data.creatorName,
                 creatorHandle = reel.creatorHandle ?: result.data.creatorHandle,
                 thumbnailUrl = reel.thumbnailUrl ?: result.data.thumbnailUrl,
+                likes = result.data.likes ?: reel.likes,
+                comments = result.data.comments ?: reel.comments,
+                views = result.data.views ?: reel.views,
+                audioName = reel.audioName ?: result.data.audioName,
                 enrichState = EnrichState.ENRICHED,
             )
         }
@@ -185,7 +189,7 @@ class ReelRepository(
     }
 
     /**
-     * AI step: sends only text the user supplied (caption, scanned text, note), never the video or link.
+     * AI step: sends only the caption and note, never raw HTML, video or link.
      * The result is cached on the reel and keyed by a hash of the input, so unchanged text costs nothing.
      */
     suspend fun organiseWithAi(reelId: Long, force: Boolean = false): OrganiseOutcome {
@@ -229,7 +233,7 @@ class ReelRepository(
 
     /** Offline queue: retry reels that were saved without a connection. */
     suspend fun retryPending() {
-        reels.pending().forEach { enrich(it.id) }
+        reels.pending().forEach { enrich(it.id); organiseWithAi(it.id) }
     }
 
     suspend fun moveToFolder(reelId: Long, folderId: Long) = mutate(reelId) { it.copy(folderId = folderId) }
