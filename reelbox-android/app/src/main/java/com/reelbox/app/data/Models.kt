@@ -47,6 +47,9 @@ data class ReelEntity(
     /** Structured result from the AI step (see ReelAi), cached so unchanged text is never sent twice. */
     val aiJson: String? = null,
     val aiHash: String? = null,
+    val likes: Long? = null,
+    val comments: Long? = null,
+    val views: Long? = null,
 ) {
     val tagList: List<String> get() = hashtags.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }
