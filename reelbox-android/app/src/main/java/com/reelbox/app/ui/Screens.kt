@@ -71,8 +71,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 is CaptureResult.Duplicate -> message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
                 is CaptureResult.Saved -> {
                     onSaved(result.reel.id)
-                    repo.enrich(result.reel.id)
-                    repo.organiseWithAi(result.reel.id).userMessage()?.let { message.value = it }
+                    (getApplication<ReelboxApp>()).importReel(result.reel.id).await()
                 }
             }
         }
