@@ -79,7 +79,7 @@ class ReelRepository(
             normalizedUrl = link.key,
             platform = link.platform,
             platformId = link.platformId,
-            title = "${link.platform.label} reel",
+            title = if (hint.isBlank()) "${link.platform.label} reel" else deriveTitle(hint),
             creatorHandle = null,
             creatorName = null,
             caption = hint.take(2000),
@@ -106,18 +106,20 @@ class ReelRepository(
 
     /** Step 2 of capture: fetch details, auto-classify, and move out of Inbox when confident. */
     suspend fun enrich(reelId: Long): EnrichOutcome? {
-        val reel = reels.get(reelId) ?: return null
-        val link = UrlParser.parse(reel.permalink) ?: return null
+        val original = reels.get(reelId) ?: return null
+        val link = UrlParser.parse(original.permalink) ?: return null
         val result = enricher.enrich(link)
+        // Re-read after the network call so edits made while loading are preserved.
+        val reel = reels.get(reelId) ?: return null
         val updated = when (result) {
             is EnrichResult.Offline -> return EnrichOutcome(reel, folders.getAll().firstOrNull { it.id == reel.folderId }, null)
-            is EnrichResult.Unavailable -> reel.copy(enrichState = EnrichState.MANUAL)
+            is EnrichResult.Unavailable, EnrichResult.DisplayOnly -> reel.copy(enrichState = if (reel.enrichState == EnrichState.ENRICHED) EnrichState.ENRICHED else EnrichState.MANUAL)
             is EnrichResult.Success -> reel.copy(
-                title = result.data.title ?: reel.title,
-                caption = result.data.caption ?: reel.caption,
-                creatorName = result.data.creatorName,
-                creatorHandle = result.data.creatorHandle,
-                thumbnailUrl = result.data.thumbnailUrl,
+                title = if (reel.title == "${reel.platform.label} reel") result.data.title ?: reel.title else reel.title,
+                caption = reel.caption.ifBlank { result.data.caption.orEmpty() },
+                creatorName = reel.creatorName ?: result.data.creatorName,
+                creatorHandle = reel.creatorHandle ?: result.data.creatorHandle,
+                thumbnailUrl = reel.thumbnailUrl ?: result.data.thumbnailUrl,
                 enrichState = EnrichState.ENRICHED,
             )
         }
@@ -126,7 +128,7 @@ class ReelRepository(
         val inbox = folders.findByName(INBOX)
         // Only auto-move out of Inbox; never override a folder the user already chose.
         val moved = if (target != null && inbox != null && updated.folderId == inbox.id && suggestion.folder != INBOX) updated.copy(folderId = target.id) else updated
-        val final = moved.copy(hashtags = (suggestion.tags).joinToString(",").ifEmpty { moved.hashtags })
+        val final = moved.copy(hashtags = (moved.tagList + suggestion.tags).distinct().take(5).joinToString(","))
         reels.update(final)
         return EnrichOutcome(final, folders.getAll().firstOrNull { it.id == final.folderId }, suggestion)
     }
