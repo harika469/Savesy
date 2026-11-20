@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,6 +66,8 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
         }
     }
 
+    LaunchedEffect(permalink) { load() }
+
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (val s = state) {
             EmbedState.Idle -> {
@@ -72,13 +76,13 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
             }
             EmbedState.Loading -> Hint("Loading the ${platform.label} post…")
             is EmbedState.Official -> {
-                SecureEmbedWebView(platform, html = s.page, url = null)
+                key(s.page) { SecureEmbedWebView(platform, html = s.page, url = null) }
                 Link("Not showing? Use the basic view") { state = EmbedState.Basic(null) }
                 Link("Hide post") { state = EmbedState.Idle }
             }
             is EmbedState.Basic -> {
                 s.note?.let { Hint(it) }
-                SecureEmbedWebView(platform, html = null, url = EmbedUrl.forReel(platform, permalink))
+                key(permalink, "basic") { SecureEmbedWebView(platform, html = null, url = EmbedUrl.forReel(platform, permalink)) }
                 Link("Hide post") { state = EmbedState.Idle }
             }
             EmbedState.Unavailable -> {
