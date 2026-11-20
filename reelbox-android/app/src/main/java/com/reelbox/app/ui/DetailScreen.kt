@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
@@ -76,6 +77,7 @@ fun DetailScreen(
             if (metrics.isNotEmpty()) Text(metrics.joinToString(" • "), color = ReelboxColors.Subtle, fontSize = 12.sp)
             reel.audioName?.let { Text(it, color = ReelboxColors.Subtle, fontSize = 12.sp) }
             if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
+            ReelLink(reel.permalink, onOpenOriginal)
             if (reel.caption.isNotBlank()) {
                 var expanded by remember(reel.id) { mutableStateOf(false) }
                 Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -148,6 +150,29 @@ fun DetailScreen(
             text = { Text("This removes it from Reelbox only. The original stays on ${reel.platform.label}.") },
             confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** The reel's link: tap to open it in Instagram/Facebook, or copy it. */
+@Composable
+private fun ReelLink(permalink: String, onOpen: () -> Unit) {
+    if (permalink.isBlank()) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(
+            "🔗 " + permalink.removePrefix("https://").removePrefix("www."),
+            color = ReelboxColors.Pink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).clickable(onClick = onOpen),
+        )
+        Text(
+            "Copy", color = ReelboxColors.Subtle, fontSize = 13.sp,
+            modifier = Modifier.clickable {
+                val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Reel link", permalink))
+                android.widget.Toast.makeText(context, "Link copied", android.widget.Toast.LENGTH_SHORT).show()
+            },
         )
     }
 }

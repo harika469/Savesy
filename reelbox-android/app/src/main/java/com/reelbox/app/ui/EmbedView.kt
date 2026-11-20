@@ -114,7 +114,7 @@ private fun SecureEmbedWebView(platform: Platform, html: String?, url: String?) 
         factory = { ctx ->
             WebView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                configureSecureWebView(this) { link -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }
+                configureSecureWebView(this, loadsDataDocument = html != null) { link -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }
                 if (html != null) loadDataWithBaseURL(EmbedHtml.baseUrl(platform), html, "text/html", "UTF-8", null)
                 else if (url != null) loadUrl(url)
             }
