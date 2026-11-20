@@ -43,7 +43,8 @@ fun DetailScreen(
     onNote: (String) -> Unit,
     onTitle: (String) -> Unit,
     onDescribe: (String) -> Unit,
-    onScreenshot: (android.net.Uri) -> Unit,
+    onScreenshot: (List<android.net.Uri>) -> Unit,
+    onPasteCaption: (String) -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
@@ -62,7 +63,13 @@ fun DetailScreen(
             )
             Text("${reel.creatorHandle ?: reel.platform.label} • ${item.folder?.name ?: "Inbox"}", color = ReelboxColors.Subtle, fontSize = 12.sp)
             if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
-            if (reel.caption.isNotBlank()) Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp)
+            if (reel.caption.isNotBlank()) {
+                var expanded by remember(reel.id) { mutableStateOf(false) }
+                Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                if (reel.caption.length > 240) {
+                    Text(if (expanded) "Show less" else "Show full caption", color = ReelboxColors.Pink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { expanded = !expanded })
+                }
+            }
             if (reel.tagList.isNotEmpty()) TagPills(reel.tagList)
 
             if (reel.enrichState == EnrichState.MANUAL && reel.note.isBlank()) {
@@ -78,6 +85,7 @@ fun DetailScreen(
 
             EmbedView(reel.platform, reel.permalink)
 
+            PasteCaptionLink(onPasteCaption)
             ScreenshotPickerLink(onScreenshot)
 
             Text("Status", fontWeight = FontWeight.Bold, fontSize = 15.sp)

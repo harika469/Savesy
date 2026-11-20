@@ -42,15 +42,18 @@ class ThumbStore(private val context: Context) {
 /** Reads a screenshot on the phone (ML Kit, offline) and fills the reel's creator, caption, tags and thumbnail. */
 class ScreenshotImporter(private val context: Context, private val repo: ReelRepository, private val thumbs: ThumbStore = ThumbStore(context)) {
     /** @return a short message for the user describing what was found. */
-    suspend fun import(reelId: Long, uri: Uri): String {
-        val (lines, height) = try { read(uri) } catch (_: Exception) { return "Couldn't read that image" }
-        val info = ScreenshotParser.parse(lines, height)
-        val thumb = thumbs.save(reelId, uri)
+    suspend fun import(reelId: Long, uris: List<Uri>): String {
+        if (uris.isEmpty()) return "No screenshot chosen"
+        val parsed = try {
+            uris.map { uri -> val (lines, height) = read(uri); ScreenshotParser.parse(lines, height) }
+        } catch (_: Exception) { return "Couldn't read that image" }
+        val info = ScreenshotParser.merge(parsed)
+        val thumb = thumbs.save(reelId, uris.first())
         val outcome = repo.applyScreenshot(reelId, info, thumb)
         if (outcome == null || (info.isEmpty && thumb == null)) return "No text found in that screenshot"
         val found = buildList {
             info.handle?.let { add(it) }
-            if (info.caption.isNotBlank()) add("caption")
+            if (info.caption.isNotBlank()) add(if (uris.size > 1) "caption from ${uris.size} screenshots" else "caption")
             if (info.hashtags.isNotEmpty()) add("${info.hashtags.size} hashtag${if (info.hashtags.size == 1) "" else "s"}")
         }
         return if (found.isEmpty()) "Saved the screenshot, but found no text to read" else "Found " + found.joinToString(", ")

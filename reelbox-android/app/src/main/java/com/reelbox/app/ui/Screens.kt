@@ -88,8 +88,14 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
     private val thumbs = ThumbStore(app)
     private val importer = ScreenshotImporter(app, repo, thumbs)
-    fun screenshot(id: Long, uri: android.net.Uri, onMessage: (String) -> Unit) {
-        viewModelScope.launch { onMessage("Reading screenshot…"); onMessage(importer.import(id, uri)) }
+    fun screenshot(id: Long, uris: List<android.net.Uri>, onMessage: (String) -> Unit) {
+        viewModelScope.launch { onMessage("Reading screenshot…"); onMessage(importer.import(id, uris)) }
+    }
+    fun pasteCaption(id: Long, text: String, onMessage: (String) -> Unit) {
+        viewModelScope.launch {
+            val out = repo.setCaptionFromText(id, text)
+            onMessage(if (out == null) "Nothing to paste" else "Caption saved (${text.trim().length} characters)")
+        }
     }
     fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
 }

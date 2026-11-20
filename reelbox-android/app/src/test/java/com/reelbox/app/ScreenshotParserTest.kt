@@ -70,4 +70,23 @@ class ScreenshotParserTest {
         val r = ScreenshotParser.parse(listOf(OcrLine("creator_one · Follow", 1900), OcrLine("A short caption ...more", 1960)), h)
         assertEquals("A short caption", r.caption)
     }
+
+    @Test fun twoScrolledScreenshotsMergeWithoutRepeatingOverlap() {
+        val first = ScreenshotParser.parse(listOf(
+            OcrLine("foodie_harika · Follow", 1900), OcrLine("Step one: boil the pasta in salted water", 1960),
+            OcrLine("Step two: fry the paneer until golden", 2010), OcrLine("♫ Original audio", 2200)), h)
+        val second = ScreenshotParser.parse(listOf(
+            OcrLine("foodie_harika · Follow", 1900), OcrLine("Step two: fry the paneer until golden", 1960),
+            OcrLine("Step three: add the masala and simmer #recipe", 2010), OcrLine("♫ Original audio", 2200)), h)
+        val merged = ScreenshotParser.merge(listOf(first, second))
+        assertEquals("@foodie_harika", merged.handle)
+        assertEquals("Step one: boil the pasta in salted water Step two: fry the paneer until golden Step three: add the masala and simmer #recipe", merged.caption)
+        assertEquals(listOf("recipe"), merged.hashtags)
+    }
+
+    @Test fun mergingOneScreenshotChangesNothing() {
+        val one = ScreenshotParser.parse(listOf(OcrLine("creator_one · Follow", 1900), OcrLine("A short caption", 1960)), h)
+        assertEquals(one.caption, ScreenshotParser.merge(listOf(one)).caption)
+        assertEquals(one.handle, ScreenshotParser.merge(listOf(one)).handle)
+    }
 }

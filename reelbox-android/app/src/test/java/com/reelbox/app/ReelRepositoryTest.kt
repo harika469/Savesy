@@ -226,4 +226,19 @@ class ReelRepositoryTest {
         assertEquals("file:///t.jpg", repo.delete(saved.reel.id))
         assertEquals(null, repo.delete(saved.reel.id))
     }
+
+    @Test fun pastedLongCaptionIsStoredInFullFiledAndSearchable() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        val long = "Easy dinner recipe for the whole family. " + "Stir well and keep going. ".repeat(150) + "Finish with zaatar and lemon #recipe #dinner"
+        val out = repo.setCaptionFromText(saved.reel.id, long)!!
+        assertEquals(long.trim(), out.reel.caption)
+        assertEquals("Recipes", out.folder?.name)
+        val found = repo.observeReels().first().filter { com.reelbox.app.domain.ReelSearch.matches(it, "zaatar") }
+        assertEquals(1, found.size)
+    }
+
+    @Test fun blankPastedCaptionIsIgnored() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        assertEquals(null, repo.setCaptionFromText(saved.reel.id, "  \n "))
+    }
 }

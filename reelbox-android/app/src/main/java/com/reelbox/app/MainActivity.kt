@@ -131,7 +131,8 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
                 onNote = { vm.note(id, it) },
                 onTitle = { vm.title(id, it) },
                 onDescribe = { vm.describe(id, it) },
-                onScreenshot = { uri -> vm.screenshot(id, uri) { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } },
+                onScreenshot = { uris -> vm.screenshot(id, uris) { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } },
+                onPasteCaption = { text -> vm.pasteCaption(id, text) { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } },
                 onDelete = { vm.delete(id); onBack() },
             )
         }

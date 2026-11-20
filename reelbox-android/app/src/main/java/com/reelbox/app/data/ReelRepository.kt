@@ -158,6 +158,12 @@ class ReelRepository(
         return EnrichOutcome(updated, folders.getAll().firstOrNull { it.id == updated.folderId }, suggestion)
     }
 
+    /** The exact caption copied from Instagram/Facebook. Replaces the caption, then tags and files the reel. */
+    suspend fun setCaptionFromText(reelId: Long, text: String): EnrichOutcome? {
+        val caption = text.trim().ifEmpty { return null }
+        return applyScreenshot(reelId, ScreenshotInfo(null, caption, Classifier.hashtags(caption), null), null)
+    }
+
     suspend fun isSaved(sharedText: String): Boolean {
         val link = UrlParser.parse(sharedText) ?: return false
         return reels.findByKey(link.key) != null

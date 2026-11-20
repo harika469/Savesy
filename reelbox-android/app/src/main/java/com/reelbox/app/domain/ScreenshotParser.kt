@@ -3,7 +3,13 @@ package com.reelbox.app.domain
 /** One line of text found in a screenshot, with its position. */
 data class OcrLine(val text: String, val top: Int, val left: Int = 0)
 
-data class ScreenshotInfo(val handle: String?, val caption: String, val hashtags: List<String>, val audio: String?) {
+data class ScreenshotInfo(
+    val handle: String?,
+    val caption: String,
+    val hashtags: List<String>,
+    val audio: String?,
+    val captionLines: List<String> = if (caption.isBlank()) emptyList() else listOf(caption),
+) {
     val isEmpty: Boolean get() = handle == null && caption.isBlank() && hashtags.isEmpty() && audio == null
 }
 
@@ -64,7 +70,27 @@ object ScreenshotParser {
         val audioTop = audioLine?.top ?: Int.MAX_VALUE
         val captionLines = candidates.filter { it.top < audioTop }.map { it.text }
         val caption = moreSuffix.replace(captionLines.joinToString(" ").trim(), "").trim()
+        val cleanedLines = captionLines.toMutableList().also { if (it.isNotEmpty()) it[it.lastIndex] = moreSuffix.replace(it.last(), "").trim() }.filter { it.isNotEmpty() }
 
-        return ScreenshotInfo(handle?.let { "@$it" }, caption, hashtags, audio)
+        return ScreenshotInfo(handle?.let { "@$it" }, caption, hashtags, audio, cleanedLines)
+    }
+
+    /**
+     * Combines several screenshots of one reel (for example the caption scrolled to the end). Lines that
+     * already appeared in an earlier screenshot are dropped, so overlapping parts aren't repeated.
+     */
+    fun merge(infos: List<ScreenshotInfo>): ScreenshotInfo {
+        val seen = mutableSetOf<String>()
+        val lines = mutableListOf<String>()
+        for (info in infos) for (line in info.captionLines) {
+            if (seen.add(line.lowercase().trim())) lines += line
+        }
+        return ScreenshotInfo(
+            handle = infos.firstNotNullOfOrNull { it.handle },
+            caption = lines.joinToString(" ").trim(),
+            hashtags = infos.flatMap { it.hashtags }.distinct(),
+            audio = infos.firstNotNullOfOrNull { it.audio },
+            captionLines = lines,
+        )
     }
 }

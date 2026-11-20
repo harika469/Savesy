@@ -224,10 +224,10 @@ fun DescribeBox(onSubmit: (String) -> Unit, modifier: Modifier = Modifier, place
 
 /** "Fill in from a screenshot": opens the system photo picker (no storage permission needed). */
 @Composable
-fun ScreenshotPickerLink(onPicked: (android.net.Uri) -> Unit, modifier: Modifier = Modifier) {
+fun ScreenshotPickerLink(onPicked: (List<android.net.Uri>) -> Unit, modifier: Modifier = Modifier) {
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-    ) { uri -> if (uri != null) onPicked(uri) }
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(5),
+    ) { uris -> if (uris.isNotEmpty()) onPicked(uris) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             "📷 Fill in from a screenshot",
@@ -236,6 +236,25 @@ fun ScreenshotPickerLink(onPicked: (android.net.Uri) -> Unit, modifier: Modifier
                 picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
         )
-        Text("Screenshot the reel, then pick it. Reelbox reads it on your phone; nothing is uploaded.", fontSize = 12.sp, color = ReelboxColors.Subtle)
+        Text("Long caption? Tap \"more\" first, and pick up to 5 screenshots as you scroll. Reelbox reads them on your phone; nothing is uploaded.", fontSize = 12.sp, color = ReelboxColors.Subtle)
+    }
+}
+
+/** Pastes the caption the user copied in Instagram/Facebook (long-press the caption, Copy). Exact and fully searchable. */
+@Composable
+fun PasteCaptionLink(onPaste: (String) -> Unit, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "📋 Paste caption",
+            color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+            modifier = Modifier.clickable {
+                val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                if (text.isBlank()) android.widget.Toast.makeText(context, "Nothing copied yet. Copy the caption in Instagram first.", android.widget.Toast.LENGTH_SHORT).show()
+                else onPaste(text)
+            },
+        )
+        Text("Copy the caption in Instagram, then tap here for the full, exact text. It makes the whole caption searchable.", fontSize = 12.sp, color = ReelboxColors.Subtle)
     }
 }

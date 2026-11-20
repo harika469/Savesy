@@ -39,7 +39,7 @@ fun CaptureSheet(
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
     onDescribe: (String) -> Unit,
-    onScreenshot: (android.net.Uri) -> Unit,
+    onScreenshot: (List<android.net.Uri>) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -70,7 +70,7 @@ private fun SavedBody(
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
     onDescribe: (String) -> Unit,
-    onScreenshot: (android.net.Uri) -> Unit,
+    onScreenshot: (List<android.net.Uri>) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {

@@ -62,10 +62,10 @@ class ShareActivity : ComponentActivity() {
                                 }
                             }
                         },
-                        onScreenshot = { uri ->
+                        onScreenshot = { uris ->
                             reelId?.let { id ->
                                 lifecycleScope.launch {
-                                    android.widget.Toast.makeText(this@ShareActivity, importer.import(id, uri), android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(this@ShareActivity, importer.import(id, uris), android.widget.Toast.LENGTH_SHORT).show()
                                     refresh(id)
                                 }
                             }
