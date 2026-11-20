@@ -78,6 +78,9 @@ private fun SavedBody(
     val detail = when {
         state.described && state.confidence == Confidence.HIGH -> "Organised from what you said"
         state.described -> "Not sure about this folder: change it below if needed"
+        state.pending -> "Checking the public link. You can add details while you wait."
+        state.manual -> "The link is saved. This provider may only supply a preview; add a caption or screenshot for more detail."
+        state.confidence == Confidence.HIGH -> "Organised using the available details"
         else -> "Tell Reelbox what it is so it can add tags and file it"
     }
     Text("Saved to $where", fontSize = 18.sp, fontWeight = FontWeight.Bold)
