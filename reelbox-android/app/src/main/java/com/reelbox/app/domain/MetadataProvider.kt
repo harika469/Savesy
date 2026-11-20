@@ -12,6 +12,10 @@ data class Enrichment(
     val creatorName: String?,
     val creatorHandle: String?,
     val thumbnailUrl: String?,
+    val likes: Long? = null,
+    val comments: Long? = null,
+    val views: Long? = null,
+    val audioName: String? = null,
 )
 
 sealed interface EnrichResult {
