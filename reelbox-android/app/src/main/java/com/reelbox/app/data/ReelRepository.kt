@@ -4,6 +4,7 @@ import com.reelbox.app.domain.Classifier
 import com.reelbox.app.domain.Confidence
 import com.reelbox.app.domain.EnrichResult
 import com.reelbox.app.domain.ParsedLink
+import com.reelbox.app.domain.ScreenshotInfo
 import com.reelbox.app.domain.ReelEnricher
 import com.reelbox.app.domain.Suggestion
 import com.reelbox.app.domain.UrlParser
@@ -131,6 +132,32 @@ class ReelRepository(
         return EnrichOutcome(updated, folders.getAll().firstOrNull { it.id == updated.folderId }, suggestion)
     }
 
+    /** Fills a reel from a screenshot the user took of it (creator, caption, hashtags, audio, thumbnail). */
+    suspend fun applyScreenshot(reelId: Long, info: ScreenshotInfo, thumbnailUrl: String?): EnrichOutcome? {
+        val reel = reels.get(reelId) ?: return null
+        if (info.isEmpty && thumbnailUrl == null) return null
+        val caption = info.caption.ifBlank { reel.caption }
+        val title = if (reel.title == "${reel.platform.label} reel" && caption.isNotBlank()) deriveTitle(caption) else reel.title
+        val hashtagText = info.hashtags.joinToString(" ") { "#$it" }
+        val suggestion = Classifier.classify(title, "$caption ${reel.note} $hashtagText")
+        val inbox = folders.findByName(INBOX)
+        val target = folders.findByName(suggestion.folder)
+        val folderId = if (inbox != null && reel.folderId == inbox.id && target != null && suggestion.folder != INBOX) target.id else reel.folderId
+        val tags = (info.hashtags + suggestion.tags + reel.tagList).distinct().take(5)
+        val updated = reel.copy(
+            title = title,
+            caption = caption,
+            creatorHandle = info.handle ?: reel.creatorHandle,
+            audioName = info.audio ?: reel.audioName,
+            thumbnailUrl = thumbnailUrl ?: reel.thumbnailUrl,
+            hashtags = tags.joinToString(","),
+            folderId = folderId,
+            enrichState = EnrichState.ENRICHED,
+        )
+        reels.update(updated)
+        return EnrichOutcome(updated, folders.getAll().firstOrNull { it.id == updated.folderId }, suggestion)
+    }
+
     suspend fun isSaved(sharedText: String): Boolean {
         val link = UrlParser.parse(sharedText) ?: return false
         return reels.findByKey(link.key) != null
@@ -147,7 +174,8 @@ class ReelRepository(
     suspend fun setTitle(reelId: Long, title: String) = mutate(reelId) { it.copy(title = title.trim().ifEmpty { it.title }) }
     suspend fun markOpened(reelId: Long) = mutate(reelId) { it.copy(lastOpenedAt = now()) }
     suspend fun markUnavailable(reelId: Long) = mutate(reelId) { it.copy(isUnavailable = true) }
-    suspend fun delete(reelId: Long) { reels.get(reelId)?.let { reels.delete(it) } }
+    /** @return the deleted reel's thumbnail url so the caller can remove the stored image. */
+    suspend fun delete(reelId: Long): String? = reels.get(reelId)?.let { reels.delete(it); it.thumbnailUrl }
 
     private suspend fun mutate(id: Long, change: (ReelEntity) -> ReelEntity) {
         reels.get(id)?.let { reels.update(change(it)) }

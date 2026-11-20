@@ -43,6 +43,7 @@ fun DetailScreen(
     onNote: (String) -> Unit,
     onTitle: (String) -> Unit,
     onDescribe: (String) -> Unit,
+    onScreenshot: (android.net.Uri) -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
@@ -74,6 +75,8 @@ fun DetailScreen(
                     DescribeBox(onDescribe)
                 }
             }
+
+            ScreenshotPickerLink(onScreenshot)
 
             Text("Status", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

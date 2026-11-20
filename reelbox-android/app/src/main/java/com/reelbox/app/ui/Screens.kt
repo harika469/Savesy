@@ -8,6 +8,8 @@ import com.reelbox.app.data.CaptureResult
 import com.reelbox.app.data.FolderEntity
 import com.reelbox.app.data.ReelRepository
 import com.reelbox.app.data.ReelStatus
+import com.reelbox.app.data.ScreenshotImporter
+import com.reelbox.app.data.ThumbStore
 import com.reelbox.app.data.ReelWithFolder
 import com.reelbox.app.domain.ReelSearch
 import com.reelbox.app.domain.UrlParser
@@ -84,5 +86,10 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     fun describe(id: Long, said: String) = viewModelScope.launch { repo.describe(id, said) }
     fun title(id: Long, title: String) = viewModelScope.launch { repo.setTitle(id, title) }
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
-    fun delete(id: Long) = viewModelScope.launch { repo.delete(id) }
+    private val thumbs = ThumbStore(app)
+    private val importer = ScreenshotImporter(app, repo, thumbs)
+    fun screenshot(id: Long, uri: android.net.Uri, onMessage: (String) -> Unit) {
+        viewModelScope.launch { onMessage("Reading screenshot…"); onMessage(importer.import(id, uri)) }
+    }
+    fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
 }

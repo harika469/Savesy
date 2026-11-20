@@ -61,6 +61,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // On-device text recognition (model bundled in the app; nothing is uploaded).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     val room = "2.6.1"
     implementation("androidx.room:room-runtime:$room")

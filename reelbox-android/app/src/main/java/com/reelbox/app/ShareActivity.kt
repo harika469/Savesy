@@ -19,6 +19,7 @@ import androidx.lifecycle.lifecycleScope
 import com.reelbox.app.data.CaptureResult
 import com.reelbox.app.data.EnrichState
 import com.reelbox.app.data.ReelRepository
+import com.reelbox.app.data.ScreenshotImporter
 import com.reelbox.app.ui.CaptureSheet
 import com.reelbox.app.ui.CaptureUi
 import com.reelbox.app.ui.ReelboxTheme
@@ -31,6 +32,7 @@ import kotlinx.coroutines.launch
 class ShareActivity : ComponentActivity() {
     private lateinit var repo: ReelRepository
     private var reelId: Long? = null
+    private val importer by lazy { ScreenshotImporter(this, repo) }
     private val ui = mutableStateOf<CaptureUi>(CaptureUi.Saving)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +59,14 @@ class ShareActivity : ComponentActivity() {
                                     repo.describe(id, said)?.let { outcome ->
                                         ui.value = CaptureUi.Saved(outcome.folder, outcome.suggestion?.confidence, pending = false, manual = false, described = true)
                                     }
+                                }
+                            }
+                        },
+                        onScreenshot = { uri ->
+                            reelId?.let { id ->
+                                lifecycleScope.launch {
+                                    android.widget.Toast.makeText(this@ShareActivity, importer.import(id, uri), android.widget.Toast.LENGTH_SHORT).show()
+                                    refresh(id)
                                 }
                             }
                         },
@@ -94,6 +104,6 @@ class ShareActivity : ComponentActivity() {
     private suspend fun refresh(id: Long) {
         val folderId = repo.observeReelOnce(id)?.folderId ?: return
         val current = ui.value as? CaptureUi.Saved ?: return
-        ui.value = current.copy(folder = repo.getFolders().firstOrNull { it.id == folderId }, confidence = null)
+        ui.value = current.copy(folder = repo.getFolders().firstOrNull { it.id == folderId })
     }
 }

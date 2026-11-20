@@ -188,4 +188,42 @@ class ReelRepositoryTest {
         assertTrue(!repo.isSaved("https://www.instagram.com/reel/OTHER/"))
         assertTrue(!repo.isSaved("not a link"))
     }
+
+    @Test fun screenshotFillsCreatorCaptionTagsThumbnailAndFiles() = runBlocking {
+        enricher.result = EnrichResult.Unavailable
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        val info = com.reelbox.app.domain.ScreenshotInfo("@foodie_harika", "Easy paneer butter masala in 15 minutes! Full recipe below #recipe #dinner", listOf("recipe", "dinner"), "foodie_harika · Original audio")
+        val out = repo.applyScreenshot(saved.reel.id, info, "file:///thumbs/1.jpg")!!
+        assertEquals("@foodie_harika", out.reel.creatorHandle)
+        assertEquals("Easy paneer butter masala in 15 minutes", out.reel.title)
+        assertEquals("file:///thumbs/1.jpg", out.reel.thumbnailUrl)
+        assertEquals("foodie_harika · Original audio", out.reel.audioName)
+        assertEquals("Recipes", out.folder?.name)
+        assertEquals(listOf("recipe", "dinner"), out.reel.tagList.take(2))
+        assertEquals(EnrichState.ENRICHED, out.reel.enrichState)
+    }
+
+    @Test fun screenshotKeepsExistingDetailsWhenItFindsNothing() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.setTitle(saved.reel.id, "My title")
+        val empty = com.reelbox.app.domain.ScreenshotInfo(null, "", emptyList(), null)
+        assertEquals(null, repo.applyScreenshot(saved.reel.id, empty, null))
+        val onlyThumb = repo.applyScreenshot(saved.reel.id, empty, "file:///t.jpg")!!
+        assertEquals("My title", onlyThumb.reel.title)
+        assertEquals("file:///t.jpg", onlyThumb.reel.thumbnailUrl)
+    }
+
+    @Test fun screenshotNeverMovesAReelOutOfAChosenFolder() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.moveToFolder(saved.reel.id, repo.getFolders().first { it.name == "Travel" }.id)
+        val info = com.reelbox.app.domain.ScreenshotInfo("@x", "pasta recipe #recipe", listOf("recipe"), null)
+        assertEquals("Travel", repo.applyScreenshot(saved.reel.id, info, null)!!.folder?.name)
+    }
+
+    @Test fun deleteReturnsTheThumbnailSoItsFileCanBeRemoved() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.applyScreenshot(saved.reel.id, com.reelbox.app.domain.ScreenshotInfo(null, "", emptyList(), null), "file:///t.jpg")
+        assertEquals("file:///t.jpg", repo.delete(saved.reel.id))
+        assertEquals(null, repo.delete(saved.reel.id))
+    }
 }

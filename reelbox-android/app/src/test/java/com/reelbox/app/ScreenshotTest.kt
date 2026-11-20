@@ -85,13 +85,13 @@ class ScreenshotTest {
     }
 
     @Test fun detail() {
-        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}, {}) } }
+        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}, {}, {}) } }
         save("detail")
     }
 
     @Test fun detailManual() {
         val manual = reels[1].let { it.copy(reel = it.reel.copy(title = "Instagram reel", creatorHandle = null, caption = "", hashtags = "", enrichState = EnrichState.MANUAL, folderId = f("Inbox").id), folder = f("Inbox")) }
-        rule.setContent { Frame { DetailScreen(manual, folders, {}, {}, {}, {}, {}, {}, {}) } }
+        rule.setContent { Frame { DetailScreen(manual, folders, {}, {}, {}, {}, {}, {}, {}, {}) } }
         save("detail-manual")
     }
 
@@ -99,7 +99,7 @@ class ScreenshotTest {
         rule.setContent {
             Frame {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.BottomCenter) {
-                    CaptureSheet(CaptureUi.Saved(f("Inbox"), null, pending = false, manual = true), folders, {}, {}, {}, {})
+                    CaptureSheet(CaptureUi.Saved(f("Inbox"), null, pending = false, manual = true), folders, {}, {}, {}, {}, {})
                 }
             }
         }

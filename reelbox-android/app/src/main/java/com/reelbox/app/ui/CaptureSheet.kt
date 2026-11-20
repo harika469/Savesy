@@ -39,6 +39,7 @@ fun CaptureSheet(
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
     onDescribe: (String) -> Unit,
+    onScreenshot: (android.net.Uri) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -57,7 +58,7 @@ fun CaptureSheet(
                     Text("Done", color = ReelboxColors.Subtle, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().clickable(onClick = onDone).padding(vertical = 6.dp))
                 }
-                is CaptureUi.Saved -> SavedBody(state, folders, onChangeFolder, onDescribe, onOpenApp, onDone)
+                is CaptureUi.Saved -> SavedBody(state, folders, onChangeFolder, onDescribe, onScreenshot, onOpenApp, onDone)
             }
         }
     }
@@ -69,6 +70,7 @@ private fun SavedBody(
     folders: List<FolderEntity>,
     onChangeFolder: (Long) -> Unit,
     onDescribe: (String) -> Unit,
+    onScreenshot: (android.net.Uri) -> Unit,
     onOpenApp: () -> Unit,
     onDone: () -> Unit,
 ) {
@@ -81,6 +83,7 @@ private fun SavedBody(
     Text("Saved to $where", fontSize = 18.sp, fontWeight = FontWeight.Bold)
     Text(detail, color = ReelboxColors.Subtle, fontSize = 13.sp)
     DescribeBox(onDescribe)
+    ScreenshotPickerLink(onScreenshot)
     Text("Move to", fontWeight = FontWeight.Bold, fontSize = 13.sp)
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(folders, key = { it.id }) { f -> FolderChip("${f.emoji} ${f.name}", state.folder?.id == f.id) { onChangeFolder(f.id) } }

@@ -42,7 +42,10 @@ Instagram's pages directly would be scraping, which the handover rules out. So t
 
 1. **Share → Reelbox** (or copy the link and open the app: a "Reel link copied. Save it?" card appears) saves the
    link to Inbox straight away.
-2. The user **says or types a few words** about it. Voice uses the phone's built-in speech recognition (no
+2. The user takes a **screenshot of the reel and picks it** ("Fill in from a screenshot"): ML Kit reads the text on the
+   phone (nothing is uploaded) and fills creator, caption, hashtags and audio; the screenshot becomes the thumbnail.
+   OCR is best effort and not yet checked on real reel screenshots.
+3. And/or the user **says or types a few words** about it. Voice uses the phone's built-in speech recognition (no
    microphone permission). Reelbox makes a title, up to 5 tags and files it into a folder with the rules classifier.
 
 `MetaOEmbedEnricher` is kept (and tested) for when a Meta token with oEmbed Read access exists, which does return

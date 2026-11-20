@@ -221,3 +221,21 @@ fun DescribeBox(onSubmit: (String) -> Unit, modifier: Modifier = Modifier, place
         )
     }
 }
+
+/** "Fill in from a screenshot": opens the system photo picker (no storage permission needed). */
+@Composable
+fun ScreenshotPickerLink(onPicked: (android.net.Uri) -> Unit, modifier: Modifier = Modifier) {
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> if (uri != null) onPicked(uri) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            "📷 Fill in from a screenshot",
+            color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+            modifier = Modifier.clickable {
+                picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+        )
+        Text("Screenshot the reel, then pick it. Reelbox reads it on your phone; nothing is uploaded.", fontSize = 12.sp, color = ReelboxColors.Subtle)
+    }
+}
