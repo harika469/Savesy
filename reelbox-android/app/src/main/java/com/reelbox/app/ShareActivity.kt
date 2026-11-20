@@ -90,7 +90,7 @@ class ShareActivity : ComponentActivity() {
                 is CaptureResult.Saved -> {
                     reelId = result.reel.id
                     ui.value = CaptureUi.Saved(repo.getFolders().firstOrNull { it.id == result.reel.folderId }, null, pending = true, manual = false)
-                    val outcome = repo.enrich(result.reel.id)
+                    val outcome = (application as ReelboxApp).importReel(result.reel.id).await()
                     if (outcome != null) {
                         ui.value = CaptureUi.Saved(
                             outcome.folder,
@@ -99,7 +99,7 @@ class ShareActivity : ComponentActivity() {
                             manual = outcome.reel.enrichState == EnrichState.MANUAL,
                         )
                     }
-                    organiseQuietly(result.reel.id)
+                    refresh(result.reel.id)
                 }
             }
         }
