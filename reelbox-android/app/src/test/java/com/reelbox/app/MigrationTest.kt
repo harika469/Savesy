@@ -7,6 +7,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.reelbox.app.data.AppDatabase
 import com.reelbox.app.data.MIGRATION_1_2
+import com.reelbox.app.data.MIGRATION_2_3
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -38,13 +39,16 @@ class MigrationTest {
             override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
         }.writableDatabase.close()
 
-        val db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(MIGRATION_1_2).allowMainThreadQueries().build()
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3).allowMainThreadQueries().build()
         val reel = runBlocking { db.reels().get(7) }!!
         assertEquals("Old reel", reel.title)
         assertEquals("my note", reel.note)
         assertEquals("@someone", reel.creatorHandle)
         assertNull(reel.aiJson)
         assertNull(reel.aiHash)
+        assertNull(reel.likes)
+        assertNull(reel.comments)
+        assertNull(reel.views)
         db.close()
     }
 }
