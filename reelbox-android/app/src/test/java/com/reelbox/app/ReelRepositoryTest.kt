@@ -83,6 +83,26 @@ class ReelRepositoryTest {
         assertEquals(1, repo.observeReels().first().size)
     }
 
+    @Test fun publicEmbedWithoutMetadataKeepsSharedCaptionAndClassifies() = runBlocking {
+        enricher.result = EnrichResult.DisplayOnly
+        val saved = capture("Easy dinner recipe #recipe https://www.instagram.com/reel/AAA111/")
+        val outcome = repo.enrich(saved.reel.id)!!
+        assertEquals("Recipes", outcome.folder?.name)
+        assertEquals("Easy dinner recipe #recipe", outcome.reel.caption)
+        assertEquals("Easy dinner recipe #recipe", outcome.reel.title)
+        assertEquals(EnrichState.MANUAL, outcome.reel.enrichState)
+    }
+
+    @Test fun metadataDoesNotReplaceUserSuppliedFields() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/AAA111/")
+        repo.setCaptionFromText(saved.reel.id, "My own caption")
+        repo.setTitle(saved.reel.id, "My chosen title")
+        val out = repo.enrich(saved.reel.id)!!
+        assertEquals("My chosen title", out.reel.title)
+        assertEquals("My own caption", out.reel.caption)
+        assertEquals("@foodie_harika", out.reel.creatorHandle)
+    }
+
     @Test fun invalidTextIsRejected() = runBlocking {
         assertEquals(CaptureResult.Invalid, repo.capture("hello"))
         assertEquals(CaptureResult.Invalid, repo.capture("https://example.com/reel/1"))
