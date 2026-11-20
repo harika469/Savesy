@@ -70,8 +70,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 CaptureResult.Invalid -> message.value = "That doesn't look like an Instagram or Facebook reel link"
                 is CaptureResult.Duplicate -> message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
                 is CaptureResult.Saved -> {
-                    repo.enrich(result.reel.id)
                     onSaved(result.reel.id)
+                    repo.enrich(result.reel.id)
+                    repo.organiseWithAi(result.reel.id).userMessage()?.let { message.value = it }
                 }
             }
         }
