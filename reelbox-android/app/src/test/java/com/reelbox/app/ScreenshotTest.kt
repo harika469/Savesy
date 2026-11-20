@@ -92,13 +92,20 @@ class ScreenshotTest {
     }
 
     @Test fun detail() {
-        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
+        rule.setContent { Frame { DetailScreen(reels[0], folders, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
         save("detail")
+    }
+
+    @Test fun detailWithReminder() {
+        val zone = java.time.ZoneId.of("Europe/Amsterdam")
+        val withDate = reels[1].let { it.copy(reel = it.reel.copy(title = "Christmas Market in Rotterdam", eventDate = "2026-12-25", remindAt = java.time.LocalDateTime.of(2026, 12, 24, 9, 0).atZone(zone).toInstant().toEpochMilli())) }
+        rule.setContent { Frame { DetailScreen(withDate, folders, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
+        save("detail-reminder")
     }
 
     @Test fun detailManual() {
         val manual = reels[1].let { it.copy(reel = it.reel.copy(title = "Instagram reel", creatorHandle = null, caption = "", hashtags = "", enrichState = EnrichState.MANUAL, folderId = f("Inbox").id), folder = f("Inbox")) }
-        rule.setContent { Frame { DetailScreen(manual, folders, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
+        rule.setContent { Frame { DetailScreen(manual, folders, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
         save("detail-manual")
     }
 

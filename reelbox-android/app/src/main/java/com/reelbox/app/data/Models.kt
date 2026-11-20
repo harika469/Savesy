@@ -50,6 +50,11 @@ data class ReelEntity(
     val likes: Long? = null,
     val comments: Long? = null,
     val views: Long? = null,
+    /** Event date found in the text (or set by the user), as yyyy-MM-dd, and when to notify about it. */
+    val eventDate: String? = null,
+    val remindAt: Long? = null,
+    /** True once the user removed the date, so automatic detection never puts it back. */
+    @androidx.room.ColumnInfo(defaultValue = "0") val dateDismissed: Boolean = false,
 ) {
     val tagList: List<String> get() = hashtags.split(',').map { it.trim() }.filter { it.isNotEmpty() }
 }

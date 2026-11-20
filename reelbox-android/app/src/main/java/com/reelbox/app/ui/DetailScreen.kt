@@ -51,6 +51,7 @@ fun DetailScreen(
     onPasteCaption: (String) -> Unit,
     onOrganise: () -> Unit,
     onEmbedAvailability: (Boolean) -> Unit,
+    onEventDate: (java.time.LocalDate?) -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
@@ -78,6 +79,7 @@ fun DetailScreen(
             reel.audioName?.let { Text(it, color = ReelboxColors.Subtle, fontSize = 12.sp) }
             if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
             ReelLink(reel.permalink, onOpenOriginal)
+            ReminderPanel(reel, onEventDate)
             if (reel.caption.isNotBlank()) {
                 var expanded by remember(reel.id) { mutableStateOf(false) }
                 Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)

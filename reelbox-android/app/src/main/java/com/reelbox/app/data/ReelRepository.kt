@@ -8,7 +8,12 @@ import com.reelbox.app.domain.ScreenshotInfo
 import com.reelbox.app.domain.AiOrganiser
 import com.reelbox.app.domain.AiResult
 import com.reelbox.app.domain.MetadataProvider
+import com.reelbox.app.domain.DateExtractor
 import com.reelbox.app.domain.NoAiOrganiser
+import com.reelbox.app.domain.NoScheduler
+import com.reelbox.app.domain.ReminderPlanner
+import com.reelbox.app.domain.ReminderScheduler
+import java.time.LocalDate
 import com.reelbox.app.domain.ReelAi
 import com.reelbox.app.domain.Suggestion
 import com.reelbox.app.domain.UrlParser
@@ -43,6 +48,8 @@ class ReelRepository(
     private val enricher: MetadataProvider,
     private val now: () -> Long = System::currentTimeMillis,
     private val ai: AiOrganiser = NoAiOrganiser,
+    private val scheduler: ReminderScheduler = NoScheduler,
+    private val zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
 ) {
     private val reels get() = db.reels()
     private val folders get() = db.folders()
@@ -193,6 +200,8 @@ class ReelRepository(
      * The result is cached on the reel and keyed by a hash of the input, so unchanged text costs nothing.
      */
     suspend fun organiseWithAi(reelId: Long, force: Boolean = false): OrganiseOutcome {
+        // Every path that adds text (import, paste, screenshot, voice) ends here, so look for a date first. Never throws.
+        runCatching { detectEventDate(reelId) }
         val reel = reels.get(reelId) ?: return OrganiseOutcome.Failed("Reel not found")
         val text = listOf(reel.caption, reel.note).filter { it.isNotBlank() }.joinToString("\n\n").take(MAX_AI_TEXT)
         if (text.length < MIN_AI_TEXT) return OrganiseOutcome.TooLittleText
@@ -226,6 +235,37 @@ class ReelRepository(
         }
     }
 
+    // ---- Date reminders -------------------------------------------------------------------------------------
+
+    private fun today(): LocalDate = java.time.Instant.ofEpochMilli(now()).atZone(zone).toLocalDate()
+
+    /** Sets (or with null removes) the event date and its reminder. A date set or removed by hand is never changed automatically. */
+    suspend fun setEventDate(reelId: Long, date: LocalDate?): ReelEntity? {
+        val reel = reels.get(reelId) ?: return null
+        val remindAt = date?.let { ReminderPlanner.remindAt(it, now(), zone) }
+        val updated = reel.copy(eventDate = date?.toString(), remindAt = remindAt, dateDismissed = date == null)
+        reels.update(updated)
+        if (remindAt != null) scheduler.schedule(reelId, remindAt) else scheduler.cancel(reelId)
+        return updated
+    }
+
+    /** Looks for an upcoming date in the title, caption and note. Skips reels that already have a date or whose date the user removed. */
+    suspend fun detectEventDate(reelId: Long): LocalDate? {
+        val reel = reels.get(reelId) ?: return null
+        if (reel.eventDate != null || reel.dateDismissed) return null
+        val text = listOf(reel.title, reel.caption, reel.note).filter { it.isNotBlank() }.joinToString("\n")
+        val found = DateExtractor.next(text, today()) ?: return null
+        return setEventDate(reelId, found.date)?.let { found.date }
+    }
+
+    /** The notification has been shown: keep the date, clear the pending reminder. */
+    suspend fun markReminderSent(reelId: Long) = mutate(reelId) { it.copy(remindAt = null) }
+
+    /** After a restart or an update, make sure every pending reminder is scheduled again. */
+    suspend fun rescheduleReminders() {
+        reels.withReminders().forEach { reel -> reel.remindAt?.let { scheduler.schedule(reel.id, it) } }
+    }
+
     suspend fun isSaved(sharedText: String): Boolean {
         val link = UrlParser.parse(sharedText) ?: return false
         return reels.findByKey(link.key) != null
@@ -245,7 +285,7 @@ class ReelRepository(
     /** Instagram/Facebook said the post can't be shown (private or removed). Notes and tags are kept; reversible. */
     suspend fun setUnavailable(reelId: Long, value: Boolean) = mutate(reelId) { if (it.isUnavailable == value) it else it.copy(isUnavailable = value) }
     /** @return the deleted reel's thumbnail url so the caller can remove the stored image. */
-    suspend fun delete(reelId: Long): String? = reels.get(reelId)?.let { reels.delete(it); it.thumbnailUrl }
+    suspend fun delete(reelId: Long): String? = reels.get(reelId)?.let { reels.delete(it); scheduler.cancel(reelId); it.thumbnailUrl }
 
     private suspend fun mutate(id: Long, change: (ReelEntity) -> ReelEntity) {
         reels.get(id)?.let { reels.update(change(it)) }

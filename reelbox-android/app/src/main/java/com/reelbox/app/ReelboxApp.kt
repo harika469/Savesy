@@ -42,7 +42,7 @@ class ReelboxApp : Application() {
             SupabaseAiOrganiser(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY, auth)
         } else NoAiOrganiser
         val provider = if (BuildConfig.CAPTIONED_EMBED_IMPORT) CaptionedEmbedProvider() else MetaOEmbedProvider()
-        ReelRepository(AppDatabase.create(this), provider, ai = ai)
+        ReelRepository(AppDatabase.create(this), provider, ai = ai, scheduler = WorkReminderScheduler(this))
     }
 }
 

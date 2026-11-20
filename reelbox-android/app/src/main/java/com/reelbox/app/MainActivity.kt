@@ -43,11 +43,23 @@ import com.reelbox.app.ui.ReelboxTheme
 
 class MainActivity : ComponentActivity() {
     private val homeViewModel: HomeViewModel by viewModels()
+    /** Set when the user taps a reminder notification; the navigation consumes it. */
+    private val openReel = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
+
+    private fun handleIntent(intent: Intent?) {
+        intent?.getLongExtra(Notifications.EXTRA_REEL_ID, -1L)?.takeIf { it > 0 }?.let { openReel.value = it }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { ReelboxTheme { ReelboxNav(homeViewModel) } }
+        handleIntent(intent)
+        setContent { ReelboxTheme { ReelboxNav(homeViewModel, openReel) } }
     }
 
     // Android only lets the app in the foreground read the clipboard, so check once we have focus.
@@ -61,8 +73,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun ReelboxNav(homeViewModel: HomeViewModel) {
+private fun ReelboxNav(homeViewModel: HomeViewModel, openReel: kotlinx.coroutines.flow.MutableStateFlow<Long?>) {
     val nav = rememberNavController()
+    val requested by openReel.collectAsStateWithLifecycle()
+    LaunchedEffect(requested) { requested?.let { nav.navigate("reel/$it"); openReel.value = null } }
     NavHost(nav, startDestination = "home") {
         composable("home") { HomeRoute(onOpen = { nav.navigate("reel/$it") }, vm = homeViewModel) }
         composable("reel/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
@@ -135,6 +149,7 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
     val folders by vm.folders.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.messages.collect { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } }
     val current = item ?: return
+    AskForNotificationsOnce(active = current.reel.remindAt != null)
     Scaffold { padding ->
         androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
             DetailScreen(
@@ -155,8 +170,23 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
                 onPasteCaption = { text -> vm.pasteCaption(id, text) },
                 onOrganise = { vm.organise(id) },
                 onEmbedAvailability = { vm.embedAvailability(id, it) },
+                onEventDate = { vm.setEventDate(id, it) },
                 onDelete = { vm.delete(id); onBack() },
             )
+        }
+    }
+}
+
+/** The first time a reel has a reminder, ask once for permission to show notifications (Android 13 and newer). */
+@Composable
+private fun AskForNotificationsOnce(active: Boolean) {
+    val context = LocalContext.current
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(active) {
+        val prefs = context.getSharedPreferences("reelbox", android.content.Context.MODE_PRIVATE)
+        if (active && !Notifications.canNotify(context) && !prefs.getBoolean("asked_notifications", false)) {
+            prefs.edit().putBoolean("asked_notifications", true).apply()
+            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
