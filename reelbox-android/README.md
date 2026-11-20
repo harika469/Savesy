@@ -49,8 +49,9 @@ separate creator / caption / thumbnail fields. Those details come from the user,
 4. And/or the user **says or types a few words** about it. Voice uses the phone's built-in speech recognition (no
    microphone permission). Reelbox makes a title, up to 5 tags and files it into a folder with the rules classifier.
 
-`MetaOEmbedEnricher` is kept (and tested) for when a Meta token with oEmbed Read access exists, which does return
-author and thumbnail; switch it on in `ReelboxApp.kt`. Facebook reels via `oembed_video` were not tested.
+`MetaOEmbedProvider` (kept and tested) fills creator and thumbnail automatically if Meta ever sends them; it is not
+switched on by default (see `ReelboxApp.kt`), because a call per saved reel gains nothing while Meta sends HTML only.
+Facebook reels via `oembed_video` have not been tested against the live service.
 
 ## AI organising (Supabase Edge Function)
 
