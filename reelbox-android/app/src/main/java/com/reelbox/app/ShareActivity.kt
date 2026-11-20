@@ -89,7 +89,7 @@ class ShareActivity : ComponentActivity() {
                 is CaptureResult.Duplicate -> ui.value = CaptureUi.Duplicate(result.folder)
                 is CaptureResult.Saved -> {
                     reelId = result.reel.id
-                    ui.value = CaptureUi.Saved(repo.getFolders().firstOrNull { it.id == result.reel.folderId }, null, pending = false, manual = false)
+                    ui.value = CaptureUi.Saved(repo.getFolders().firstOrNull { it.id == result.reel.folderId }, null, pending = true, manual = false)
                     val outcome = repo.enrich(result.reel.id)
                     if (outcome != null) {
                         ui.value = CaptureUi.Saved(
@@ -99,6 +99,7 @@ class ShareActivity : ComponentActivity() {
                             manual = outcome.reel.enrichState == EnrichState.MANUAL,
                         )
                     }
+                    organiseQuietly(result.reel.id)
                 }
             }
         }
