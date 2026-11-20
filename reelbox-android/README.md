@@ -70,7 +70,7 @@ Setup:
    own anonymous user so usage can be counted). Turning on CAPTCHA protection is recommended.
 3. `supabase link --project-ref <ref>` then `supabase db push` (creates the daily usage counters).
 4. `supabase secrets set ANTHROPIC_API_KEY=... ` (optional: `AI_MODEL`, `DAILY_LIMIT=30`, `GLOBAL_DAILY_LIMIT=3000`,
-   `AI_ENABLED=false` as an off switch), then `supabase functions deploy organise` (leave JWT verification on).
+   `AI_ENABLED=false` as an off switch), then `supabase functions deploy organise` (`supabase/config.toml` sets `verify_jwt = false` because the function checks the caller itself).
 5. Add `supabase.url` and `supabase.anonKey` to `local.properties` and rebuild the app.
 6. Set a monthly spend limit with the AI provider.
 

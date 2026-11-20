@@ -4,3 +4,5 @@ local.properties
 *.apk
 .idea/
 captures/
+supabase/.temp/
+supabase/.branches/

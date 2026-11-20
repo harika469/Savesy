@@ -5,7 +5,7 @@
 //
 //   supabase secrets set ANTHROPIC_API_KEY=... [AI_MODEL=claude-haiku-5-5] [DAILY_LIMIT=30] [GLOBAL_DAILY_LIMIT=3000]
 //   supabase db push
-//   supabase functions deploy organise        # JWT verification stays ON
+//   supabase functions deploy organise        # config.toml sets verify_jwt=false; this function checks the caller itself
 //
 // Also enable Authentication -> Sign In / Providers -> "Allow anonymous sign-ins" in the dashboard.
 

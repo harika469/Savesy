@@ -1,0 +1,7 @@
+# Minimal Supabase CLI config for Reelbox. Hosted settings (anonymous sign-ins, CAPTCHA) are set in the dashboard.
+project_id = "reelbox"
+
+[functions.organise]
+# The function itself rejects any caller that is not a signed-in (anonymous) Supabase user, using
+# auth.getUser(), so the gateway's own JWT check is not needed. This also works with the new "sb_publishable_" keys.
+verify_jwt = false
