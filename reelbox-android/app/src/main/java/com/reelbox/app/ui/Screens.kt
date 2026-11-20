@@ -58,6 +58,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             repo.ensureSystemFolders()
             repo.retryPending()
+            repo.rescheduleReminders()
         }
     }
 
@@ -68,10 +69,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = repo.capture(text)) {
                 CaptureResult.Invalid -> message.value = "That doesn't look like an Instagram or Facebook reel link"
-                is CaptureResult.Duplicate -> message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
-                is CaptureResult.Saved -> {
-                    repo.enrich(result.reel.id)
+                is CaptureResult.Duplicate -> {
                     onSaved(result.reel.id)
+                    if (result.reel.caption.isBlank() || result.reel.enrichState == com.reelbox.app.data.EnrichState.PENDING) {
+                        getApplication<ReelboxApp>().importReel(result.reel.id).await()
+                    } else message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
+                }
+                is CaptureResult.Saved -> {
+                    onSaved(result.reel.id)
+                    (getApplication<ReelboxApp>()).importReel(result.reel.id).await()
                 }
             }
         }
@@ -92,6 +98,17 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     fun note(id: Long, note: String) = viewModelScope.launch { repo.setNote(id, note) }
     fun title(id: Long, title: String) = viewModelScope.launch { repo.setTitle(id, title) }
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
+
+    /** The user picked, changed or removed the event date. A reminder is set for 09:00 the day before. */
+    fun setEventDate(id: Long, date: java.time.LocalDate?) = viewModelScope.launch {
+        val reel = repo.setEventDate(id, date)
+        _messages.emit(when {
+            date == null -> "Reminder removed"
+            reel?.remindAt == null -> "That date has already passed"
+            else -> "Reminder set for " + java.time.Instant.ofEpochMilli(reel.remindAt).atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.SHORT))
+        })
+    }
     fun embedAvailability(id: Long, available: Boolean) = viewModelScope.launch { repo.setUnavailable(id, !available) }
     fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
 

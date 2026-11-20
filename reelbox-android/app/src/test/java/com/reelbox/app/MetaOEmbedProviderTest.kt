@@ -42,7 +42,7 @@ class MetaOEmbedProviderTest {
 
     @Test fun htmlOnlyAnswerGivesNoDetailsSoTheUserSuppliesThem() = runBlocking {
         reply(200, """{"html":"<blockquote class=\"instagram-media\"></blockquote>"}""")
-        assertEquals(EnrichResult.Unavailable, provider.enrich(link))
+        assertEquals(EnrichResult.DisplayOnly, provider.enrich(link))
     }
 
     @Test fun errorsMapToTheRightOutcome() = runBlocking {

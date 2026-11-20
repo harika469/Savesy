@@ -17,7 +17,7 @@ import java.io.ByteArrayInputStream
  * JavaScript stays on because the embed cannot render without it.
  */
 @SuppressLint("SetJavaScriptEnabled")
-fun configureSecureWebView(webView: WebView, openExternally: (String) -> Unit) {
+fun configureSecureWebView(webView: WebView, loadsDataDocument: Boolean = false, openExternally: (String) -> Unit) {
     webView.settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -32,18 +32,25 @@ fun configureSecureWebView(webView: WebView, openExternally: (String) -> Unit) {
         safeBrowsingEnabled = true
     }
     CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
+    // loadDataWithBaseURL shows up in shouldInterceptRequest as a main-frame data: request; let that one document through.
+    var initialDocumentPending = loadsDataDocument
     webView.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
             // Only an embed page may load in place; any other link opens in the browser (HTTPS only).
             if (EmbedPolicy.isAllowed(url) && (url.contains("/embed") || url.contains("/plugins/"))) return false
-            if (EmbedPolicy.mayOpenExternally(url)) openExternally(url)
+            // Never launch an external app because a background iframe navigated.
+            if (request.isForMainFrame && request.hasGesture() && EmbedPolicy.mayOpenExternally(url)) openExternally(url)
             return true
         }
 
-        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-            if (EmbedPolicy.isAllowedResource(request.url.toString())) null
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            val url = request.url.toString()
+            val allowed = EmbedPolicy.allowRequest(url, request.isForMainFrame, initialDocumentPending)
+            if (allowed && request.isForMainFrame && url.startsWith("data:")) initialDocumentPending = false
+            return if (allowed) null
             else WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+        }
     }
 }
 

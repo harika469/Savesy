@@ -42,7 +42,8 @@ class EmbedSafetyTest {
         assertTrue(page.contains("Content-Security-Policy"))
         assertTrue(page.contains("default-src 'none'"))
         assertEquals(1, Regex("<script", RegexOption.IGNORE_CASE).findAll(page).count())
-        assertTrue(page.contains("""<script async defer src="https://www.instagram.com/embed.js">"""))
+        assertTrue(page.contains("""<script async defer src="https://platform.instagram.com/en_US/embeds.js">"""))
+        assertTrue(page.contains("script-src https://www.instagram.com https://platform.instagram.com"))
         val facebook = EmbedHtml.page(Platform.FACEBOOK, """<div class="fb-video"></div>""")
         assertTrue(facebook.contains("https://connect.facebook.net/en_US/sdk.js"))
     }
@@ -81,5 +82,20 @@ class EmbedSafetyTest {
         assertTrue(decideEmbed(Platform.INSTAGRAM, OEmbedResult.RateLimited) is EmbedDecision.Fallback)
         assertEquals(EmbedDecision.Unavailable, decideEmbed(Platform.INSTAGRAM, OEmbedResult.Unavailable))
         assertEquals(EmbedDecision.Offline, decideEmbed(Platform.INSTAGRAM, OEmbedResult.Offline))
+    }
+
+    @Test fun theDocumentTheAppLoadsItselfIsLetThroughExactlyOnce() {
+        val doc = "data:text/html;charset=utf-8;base64,PGh0bWw+"
+        // This is the request that produced "Web page not available / ERR_HTTP_RESPONSE_CODE_FAILURE".
+        assertTrue(EmbedPolicy.allowRequest(doc, isMainFrame = true, initialDocumentPending = true))
+        assertFalse(EmbedPolicy.allowRequest(doc, isMainFrame = true, initialDocumentPending = false))
+    }
+
+    @Test fun otherDataDocumentsAndFramesStayBlocked() {
+        val doc = "data:text/html;base64,PGh0bWw+"
+        assertFalse(EmbedPolicy.allowRequest(doc, isMainFrame = false, initialDocumentPending = true))
+        assertFalse(EmbedPolicy.allowRequest("data:application/javascript,alert(1)", isMainFrame = true, initialDocumentPending = true))
+        assertFalse(EmbedPolicy.allowRequest("https://evil.example.com/x", isMainFrame = true, initialDocumentPending = true))
+        assertTrue(EmbedPolicy.allowRequest("https://platform.instagram.com/en_US/embeds.js", isMainFrame = false, initialDocumentPending = false))
     }
 }

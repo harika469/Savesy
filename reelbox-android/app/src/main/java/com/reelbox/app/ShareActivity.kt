@@ -86,11 +86,23 @@ class ShareActivity : ComponentActivity() {
         lifecycleScope.launch {
             when (val result = repo.capture(shared)) {
                 CaptureResult.Invalid -> ui.value = CaptureUi.Invalid
-                is CaptureResult.Duplicate -> ui.value = CaptureUi.Duplicate(result.folder)
+                is CaptureResult.Duplicate -> {
+                    if (result.reel.caption.isBlank() || result.reel.enrichState == EnrichState.PENDING) {
+                        reelId = result.reel.id
+                        ui.value = CaptureUi.Saved(result.folder, null, pending = true, manual = false)
+                        val outcome = (application as ReelboxApp).importReel(result.reel.id).await()
+                        if (outcome != null) {
+                            ui.value = CaptureUi.Saved(outcome.folder, outcome.suggestion?.confidence,
+                                pending = outcome.reel.enrichState == EnrichState.PENDING,
+                                manual = outcome.reel.enrichState == EnrichState.MANUAL)
+                        }
+                        refresh(result.reel.id)
+                    } else ui.value = CaptureUi.Duplicate(result.folder)
+                }
                 is CaptureResult.Saved -> {
                     reelId = result.reel.id
-                    ui.value = CaptureUi.Saved(repo.getFolders().firstOrNull { it.id == result.reel.folderId }, null, pending = false, manual = false)
-                    val outcome = repo.enrich(result.reel.id)
+                    ui.value = CaptureUi.Saved(repo.getFolders().firstOrNull { it.id == result.reel.folderId }, null, pending = true, manual = false)
+                    val outcome = (application as ReelboxApp).importReel(result.reel.id).await()
                     if (outcome != null) {
                         ui.value = CaptureUi.Saved(
                             outcome.folder,
@@ -99,6 +111,7 @@ class ShareActivity : ComponentActivity() {
                             manual = outcome.reel.enrichState == EnrichState.MANUAL,
                         )
                     }
+                    refresh(result.reel.id)
                 }
             }
         }

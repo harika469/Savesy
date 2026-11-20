@@ -34,6 +34,12 @@ Screens are rendered to `app/build/screenshots/*.png` by `ScreenshotTest` (no de
 Reminders and weekly digest, accounts and Supabase sync, export / delete-my-data, settings, custom and
 sub-folders, collections, affiliate "Act on this" cards (planned for month 3), Facebook/Instagram dedupe merge.
 
+## Experimental captioned embed import (debug APK)
+
+Debug builds now attempt a plain HTTPS GET of the public Instagram `/embed/captioned/` document and parse `contextJSON` (with visible HTML fallback). No cookie, browser automation, screenshot, or new backend is needed. Captions and creator go to the existing organiser; raw HTML never leaves the device. Counts are saved as snapshots. Facebook remains on oEmbed. Denials are respected; no login or anti-bot bypass.
+
+Release builds disable this experimental provider pending confirmation of Meta permissions for automated collection and storage. The following sections describe the existing oEmbed/manual fallback path. Run `./gradlew :app:testDebugUnitTest :app:assembleDebug` and test multiple public URLs before relying on the debug provider.
+
 ## Getting details for a reel (creator, caption, tags)
 
 Meta's public (tokenless) oEmbed returns the embed HTML, which the app renders (see "Meta oEmbed" below), but not
@@ -131,3 +137,18 @@ page renders pixel-for-pixel the same as the original HTML (0 differing pixels i
 page to the end of the card grid). Buttons and cards call the app through a small `Reelbox` bridge. If a phone has no
 system WebView, the app falls back to the native Compose home screen. While the library is empty the page shows six
 labelled sample reels (never saved or counted). Detail, share card and dialogs stay native Compose.
+
+## Date reminders
+
+If a caption, title or note contains an upcoming date, Reelbox sets a reminder for **09:00 the day before** and shows a
+notification that opens the reel. The detail page shows the date and reminder and lets the user change the date, pick one
+by hand, or remove it (a removed or hand-picked date is never changed automatically).
+
+- Dates are found by `DateExtractor`: "25 December", "Dec 25th 2026", "25-12-2026", "2026-12-25", Dutch month names. A date
+  without a year means its next occurrence; past dates are ignored; "1/2 tsp", "15 minutes" and "Dec 2026" are not dates.
+  Not understood yet: "tomorrow" / "this Saturday", times of day, Hindi or Telugu dates.
+- If 09:00 the day before has already passed but the event hasn't, the reminder comes about a minute later.
+- Scheduling uses WorkManager (survives restarts, reminders are re-queued on app start). Timing is approximate (can be a few
+  minutes late; some phones delay background work unless battery use is set to "Unrestricted").
+- Android 13+ asks once for notification permission the first time a reel has a reminder.
+- Database v4 adds `eventDate`, `remindAt`, `dateDismissed`; `MigrationTest` upgrades a v1 database through all steps.

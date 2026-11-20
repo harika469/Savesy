@@ -17,6 +17,14 @@ object EmbedPolicy {
     /** Sub-resources inside the page: the same hosts, plus the harmless in-page schemes the embed uses. */
     fun isAllowedResource(url: String): Boolean = isAllowed(url) || url == "about:blank" || url.startsWith("data:image/")
 
+    /**
+     * Decides whether the embed WebView may make a request. Besides [isAllowedResource], the one HTML document the app
+     * hands to the WebView itself (it reaches the filter as a data: URL for the main frame) is let through exactly once.
+     * A data: document asked for later, or by a frame, is still blocked.
+     */
+    fun allowRequest(url: String, isMainFrame: Boolean, initialDocumentPending: Boolean): Boolean =
+        isAllowedResource(url) || (isMainFrame && initialDocumentPending && url.startsWith("data:text/html"))
+
     /** Links that leave the embed (profile, "view on Instagram", ads) open in the browser, and only if HTTPS. */
     fun mayOpenExternally(url: String): Boolean = runCatching { java.net.URI(url).scheme == "https" }.getOrDefault(false)
 }
@@ -44,9 +52,9 @@ object EmbedHtml {
     fun baseUrl(platform: Platform) = if (platform == Platform.INSTAGRAM) "https://www.instagram.com/" else "https://www.facebook.com/"
 
     fun page(platform: Platform, safeHtml: String): String {
-        val script = if (platform == Platform.INSTAGRAM) "https://www.instagram.com/embed.js"
+        val script = if (platform == Platform.INSTAGRAM) "https://platform.instagram.com/en_US/embeds.js"
         else "https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v27.0"
-        val csp = "default-src 'none'; script-src https://www.instagram.com https://connect.facebook.net; " +
+        val csp = "default-src 'none'; script-src https://www.instagram.com https://platform.instagram.com https://connect.facebook.net; " +
             "frame-src https://*.instagram.com https://instagram.com https://*.facebook.com; " +
             "img-src https: data:; media-src https:; font-src https: data:; style-src 'unsafe-inline' https:; " +
             "connect-src https://*.instagram.com https://*.facebook.com https://*.cdninstagram.com; base-uri 'none'; form-action 'none'"

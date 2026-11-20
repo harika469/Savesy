@@ -37,6 +37,9 @@ interface ReelDao {
     @Query("SELECT * FROM reels WHERE normalizedUrl = :key LIMIT 1")
     suspend fun findByKey(key: String): ReelEntity?
 
+    @Query("SELECT * FROM reels WHERE remindAt IS NOT NULL")
+    suspend fun withReminders(): List<ReelEntity>
+
     @Query("SELECT * FROM reels WHERE enrichState = 'PENDING'")
     suspend fun pending(): List<ReelEntity>
 }
@@ -64,13 +67,29 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [ReelEntity::class, FolderEntity::class], version = 2, exportSchema = false)
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE reels ADD COLUMN likes INTEGER")
+        db.execSQL("ALTER TABLE reels ADD COLUMN comments INTEGER")
+        db.execSQL("ALTER TABLE reels ADD COLUMN views INTEGER")
+    }
+}
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE reels ADD COLUMN eventDate TEXT")
+        db.execSQL("ALTER TABLE reels ADD COLUMN remindAt INTEGER")
+        db.execSQL("ALTER TABLE reels ADD COLUMN dateDismissed INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [ReelEntity::class, FolderEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun reels(): ReelDao
     abstract fun folders(): FolderDao
 
     companion object {
         fun create(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, "reelbox.db").addMigrations(MIGRATION_1_2).build()
+            Room.databaseBuilder(context, AppDatabase::class.java, "reelbox.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

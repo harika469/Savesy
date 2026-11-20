@@ -30,7 +30,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "CAPTIONED_EMBED_IMPORT", "true")
+        }
         release {
+            // Enable only after confirming permission for automated collection.
+            buildConfigField("boolean", "CAPTIONED_EMBED_IMPORT", "false")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -62,7 +67,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     // On-device text recognition (model bundled in the app; nothing is uploaded).
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
@@ -75,6 +82,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.work:work-testing:2.9.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("org.robolectric:robolectric:4.14.1")

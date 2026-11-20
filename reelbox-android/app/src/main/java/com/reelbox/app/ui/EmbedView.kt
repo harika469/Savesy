@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,8 +42,8 @@ private sealed interface EmbedState {
 }
 
 /**
- * Shows the post as Instagram/Facebook display it (creator, caption, thumbnail). Nothing is requested until the
- * user taps. Order: Meta's official oEmbed markup in a locked-down WebView, then the basic embed page as a
+ * Shows the post as Instagram/Facebook display it (creator, caption, thumbnail) when its detail page opens.
+ * Order: Meta's official oEmbed markup in a locked-down WebView, then the basic embed page as a
  * fallback. Private, removed, rate-limited and offline cases each get their own message.
  */
 @Composable
@@ -58,11 +60,13 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
             when (val decision = decideEmbed(platform, oEmbed.fetch(platform, permalink))) {
                 is EmbedDecision.Show -> { state = EmbedState.Official(decision.page); onAvailability(true) }
                 is EmbedDecision.Fallback -> { state = EmbedState.Basic(decision.note) }
-                EmbedDecision.Unavailable -> { state = EmbedState.Unavailable; onAvailability(false) }
+                EmbedDecision.Unavailable -> { state = EmbedState.Unavailable }
                 EmbedDecision.Offline -> state = EmbedState.Offline
             }
         }
     }
+
+    LaunchedEffect(permalink) { load() }
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when (val s = state) {
@@ -72,22 +76,23 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
             }
             EmbedState.Loading -> Hint("Loading the ${platform.label} post…")
             is EmbedState.Official -> {
-                SecureEmbedWebView(platform, html = s.page, url = null)
+                key(s.page) { SecureEmbedWebView(platform, html = s.page, url = null) }
                 Link("Not showing? Use the basic view") { state = EmbedState.Basic(null) }
                 Link("Hide post") { state = EmbedState.Idle }
             }
             is EmbedState.Basic -> {
                 s.note?.let { Hint(it) }
-                SecureEmbedWebView(platform, html = null, url = EmbedUrl.forReel(platform, permalink))
+                key(permalink, "basic") { SecureEmbedWebView(platform, html = null, url = EmbedUrl.forReel(platform, permalink)) }
                 Link("Hide post") { state = EmbedState.Idle }
             }
             EmbedState.Unavailable -> {
-                Text("${platform.label} says this post isn't available. It may be private or removed. Your caption, notes and tags stay saved.", fontSize = 13.sp, lineHeight = 19.sp)
+                Text("${platform.label} could not provide an official preview. The post may be private, removed or not embeddable. Your caption, notes and tags stay saved.", fontSize = 13.sp, lineHeight = 19.sp)
                 Link("Try the basic view anyway") { state = EmbedState.Basic(null) }
                 Link("Open in ${platform.label}") { openOriginal() }
             }
             EmbedState.Offline -> {
                 Hint("Couldn't reach ${platform.label}. Check your connection.")
+                Link("Try the basic view") { state = EmbedState.Basic(null) }
                 Link("Try again") { load() }
             }
         }
@@ -109,7 +114,7 @@ private fun SecureEmbedWebView(platform: Platform, html: String?, url: String?) 
         factory = { ctx ->
             WebView(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                configureSecureWebView(this) { link -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }
+                configureSecureWebView(this, loadsDataDocument = html != null) { link -> runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }
                 if (html != null) loadDataWithBaseURL(EmbedHtml.baseUrl(platform), html, "text/html", "UTF-8", null)
                 else if (url != null) loadUrl(url)
             }

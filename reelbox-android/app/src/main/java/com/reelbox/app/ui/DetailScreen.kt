@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +19,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,12 +51,18 @@ fun DetailScreen(
     onPasteCaption: (String) -> Unit,
     onOrganise: () -> Unit,
     onEmbedAvailability: (Boolean) -> Unit,
+    onEventDate: (java.time.LocalDate?) -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
     var confirmDelete by remember { mutableStateOf(false) }
     var note by remember(reel.id) { mutableStateOf(reel.note) }
     var title by remember(reel.id) { mutableStateOf(reel.title) }
+    var lastStoredTitle by remember(reel.id) { mutableStateOf(reel.title) }
+    LaunchedEffect(reel.title) {
+        if (title == lastStoredTitle) title = reel.title
+        lastStoredTitle = reel.title
+    }
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         ReelThumb(item, 220.dp)
@@ -66,7 +74,12 @@ fun DetailScreen(
                 trailing = { if (title != reel.title) Text("Save", color = ReelboxColors.Pink, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onTitle(title) }) },
             )
             Text("${reel.creatorHandle ?: reel.platform.label} • ${item.folder?.name ?: "Inbox"}", color = ReelboxColors.Subtle, fontSize = 12.sp)
+            val metrics = listOfNotNull(reel.likes?.let { "$it likes" }, reel.comments?.let { "$it comments" }, reel.views?.let { "$it views" })
+            if (metrics.isNotEmpty()) Text(metrics.joinToString(" • "), color = ReelboxColors.Subtle, fontSize = 12.sp)
+            reel.audioName?.let { Text(it, color = ReelboxColors.Subtle, fontSize = 12.sp) }
             if (reel.isUnavailable) Text("This reel is no longer available. Your note and tags are kept.", color = Color(0xFFB91C1C), fontSize = 13.sp)
+            ReelLink(reel.permalink, onOpenOriginal)
+            ReminderPanel(reel, onEventDate)
             if (reel.caption.isNotBlank()) {
                 var expanded by remember(reel.id) { mutableStateOf(false) }
                 Text(reel.caption, fontSize = 14.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 6, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -84,7 +97,7 @@ fun DetailScreen(
                 ) {
                     Text("Saved. Now add the details", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
-                        "Instagram doesn't let apps read a reel's caption from its link, so give Reelbox the text once. It then adds the title, tags and folder for you.",
+                        "If the public preview does not supply a caption, add text and Reelbox can organise it for you.",
                         fontSize = 13.sp, lineHeight = 19.sp, color = ReelboxColors.Muted,
                     )
                     PasteCaptionButton(onPasteCaption)
@@ -139,6 +152,29 @@ fun DetailScreen(
             text = { Text("This removes it from Reelbox only. The original stays on ${reel.platform.label}.") },
             confirmButton = { TextButton(onClick = { confirmDelete = false; onDelete() }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** The reel's link: tap to open it in Instagram/Facebook, or copy it. */
+@Composable
+private fun ReelLink(permalink: String, onOpen: () -> Unit) {
+    if (permalink.isBlank()) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(
+            "🔗 " + permalink.removePrefix("https://").removePrefix("www."),
+            color = ReelboxColors.Pink, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).clickable(onClick = onOpen),
+        )
+        Text(
+            "Copy", color = ReelboxColors.Subtle, fontSize = 13.sp,
+            modifier = Modifier.clickable {
+                val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("Reel link", permalink))
+                android.widget.Toast.makeText(context, "Link copied", android.widget.Toast.LENGTH_SHORT).show()
+            },
         )
     }
 }
