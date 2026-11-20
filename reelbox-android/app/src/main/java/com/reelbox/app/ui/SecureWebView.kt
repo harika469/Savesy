@@ -37,7 +37,8 @@ fun configureSecureWebView(webView: WebView, openExternally: (String) -> Unit) {
             val url = request.url.toString()
             // Only an embed page may load in place; any other link opens in the browser (HTTPS only).
             if (EmbedPolicy.isAllowed(url) && (url.contains("/embed") || url.contains("/plugins/"))) return false
-            if (EmbedPolicy.mayOpenExternally(url)) openExternally(url)
+            // Never launch an external app because a background iframe navigated.
+            if (request.isForMainFrame && request.hasGesture() && EmbedPolicy.mayOpenExternally(url)) openExternally(url)
             return true
         }
 
