@@ -135,6 +135,7 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
                 onScreenshot = { uris -> vm.screenshot(id, uris) },
                 onPasteCaption = { text -> vm.pasteCaption(id, text) },
                 onOrganise = { vm.organise(id) },
+                onEmbedAvailability = { vm.embedAvailability(id, it) },
                 onDelete = { vm.delete(id); onBack() },
             )
         }

@@ -92,6 +92,7 @@ class DetailViewModel(app: Application) : AndroidViewModel(app) {
     fun note(id: Long, note: String) = viewModelScope.launch { repo.setNote(id, note) }
     fun title(id: Long, title: String) = viewModelScope.launch { repo.setTitle(id, title) }
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
+    fun embedAvailability(id: Long, available: Boolean) = viewModelScope.launch { repo.setUnavailable(id, !available) }
     fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
 
     /** After new text arrives (spoken, pasted, scanned) the AI step runs on its own, once per unchanged text. */

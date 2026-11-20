@@ -36,9 +36,8 @@ sub-folders, collections, affiliate "Act on this" cards (planned for month 3), F
 
 ## Getting details for a reel (creator, caption, tags)
 
-Tested on 20 Nov 2026: Meta's oEmbed works **without a token** (HTTP 200) but returns only an embed
-placeholder (`html` saying "View this post on Instagram"): no title, author, caption or thumbnail. Reading
-Instagram's pages directly would be scraping, which the handover rules out. So the app does this instead:
+Meta's public (tokenless) oEmbed returns the embed HTML, which the app renders (see "Meta oEmbed" below), but not
+separate creator / caption / thumbnail fields. Those details come from the user, so the app does this:
 
 1. **Share → Reelbox** (or copy the link and open the app: a "Reel link copied. Save it?" card appears) saves the
    link to Inbox straight away.
@@ -79,9 +78,39 @@ cheap to create, so the app-wide cap and the provider spend limit are the real s
 
 Function tests: `node --experimental-strip-types --test supabase/functions/organise/logic.test.ts`
 
-## Why there is no Meta oEmbed / Graph API
+## Meta oEmbed (current rules, checked Nov 2026)
 
-Meta's oEmbed Read needs App Review, which needs a verified business. Tokenless oEmbed returns no creator, caption or
-thumbnail. So the app shows Instagram's own embed page for a reel (loaded on tap) and takes text from the user.
-`MetaOEmbedProvider` stays in the code behind the `MetadataProvider` interface for when a business is registered.
-Providers are interchangeable: add another `MetadataProvider` and pass it to `ReelRepository`.
+On 15 June 2026 Meta removed the access-token and App Review requirement for **public** oEmbed requests
+(Meta's Graph API reference for oEmbed Post / oEmbed Video, and the 15 June 2026 developer blog post). Reelbox uses it as follows:
+
+- `OEmbedClient` (OkHttp) calls `https://graph.facebook.com/v27.0/instagram_oembed` (Instagram) or `/oembed_video`
+  (Facebook) with only the public reel link. It never sends an app token, an App ID or Secret, a cookie or any user
+  identifier (a unit test asserts this). There is no scraping and no browser automation.
+- The answer is the **embed HTML**. Unauthenticated, it normally has no separate creator, caption or thumbnail fields,
+  so those still come from the user (pasted caption, screenshots, spoken words) and the AI step. If Meta does send
+  `author_name`, `title` or `thumbnail_url`, `MetaOEmbedProvider` uses them.
+- **Rendering**: tapping "Show the post here" on a reel fetches the embed, cleans it (scripts, inline event handlers
+  and `javascript:` links removed), and shows it in a locked-down WebView: a strict Content-Security-Policy, only the
+  official Instagram / Facebook script, HTTPS and Instagram/Facebook hosts only, no file or content access, no
+  popups, no third-party cookies, links out open in the browser.
+- **Fallback**: if oEmbed is rate limited or its answer can't be read, the app shows the basic embed page instead
+  (`/embed/captioned/` for Instagram, the Facebook video plugin). "Not showing? Use the basic view" switches by hand.
+- **Private, removed or unavailable posts** (HTTP 4xx): a clear message, the reel is flagged unavailable (reversible,
+  nothing is deleted, caption/notes/tags stay), with "Try the basic view anyway" and "Open in Instagram".
+  Rate limits and no connection get their own messages and a retry.
+- Limits and terms: unauthenticated calls are rate limited (about 1,000 per endpoint per hour was reported at
+  launch) and Meta's terms restrict oEmbed data to displaying the embed. Reelbox therefore stores only the user's own
+  text, not data taken from the embed.
+- A Meta developer app is **not needed**. Meta's token-based route (higher limits) still requires App Review and a verified business.
+
+Providers are interchangeable: implement `MetadataProvider` and pass it to `ReelRepository`.
+
+## Manual test checklist (needs a real phone: not done yet)
+
+Automated tests cover the logic (106), but nothing has run on a device or emulator. On a phone, check:
+1. Open a reel's page, tap "Show the Instagram post here": the post renders (creator, caption, media). Try one public reel, one private and one deleted.
+2. "Not showing? Use the basic view" switches to the fallback; "Hide post" collapses it.
+3. Airplane mode: "Couldn't reach Instagram" and "Try again" works afterwards.
+4. Tapping the creator name or "View more" opens the browser, not the WebView.
+5. A removed or private post shows the unavailable message and the reel keeps its notes.
+6. Share a reel from Instagram: Reelbox appears in the share sheet (scroll or tap More).

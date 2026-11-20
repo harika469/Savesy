@@ -13,10 +13,6 @@ object EmbedUrl {
         Platform.FACEBOOK -> "https://www.facebook.com/plugins/video.php?show_text=true&width=500&href=" + URLEncoder.encode(permalink, "UTF-8")
     }
 
-    /** Only the embed itself may load inside the app; any other link opens in the browser. */
-    fun isEmbedHost(url: String): Boolean {
-        val host = runCatching { java.net.URI(url).host }.getOrNull()?.lowercase() ?: return false
-        return host == "www.instagram.com" || host == "instagram.com" || host == "www.facebook.com" || host == "facebook.com" ||
-            host == "static.xx.fbcdn.net" || host.endsWith(".cdninstagram.com") || host.endsWith(".fbcdn.net")
-    }
+    /** Kept for callers of the old name: the rules now live in [EmbedPolicy]. */
+    fun isEmbedHost(url: String): Boolean = EmbedPolicy.isAllowed(url)
 }

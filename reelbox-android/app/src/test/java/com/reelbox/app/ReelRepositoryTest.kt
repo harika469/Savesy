@@ -241,4 +241,15 @@ class ReelRepositoryTest {
         val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
         assertEquals(null, repo.setCaptionFromText(saved.reel.id, "  \n "))
     }
+
+    @Test fun unavailableFlagCanBeSetAndClearedWithoutLosingNotes() = runBlocking {
+        val saved = capture("https://www.instagram.com/reel/DfHfFlIhjUI/")
+        repo.setNote(saved.reel.id, "keep me")
+        repo.setUnavailable(saved.reel.id, true)
+        assertTrue(repo.observeReel(saved.reel.id).first()!!.isUnavailable)
+        repo.setUnavailable(saved.reel.id, false)
+        val r = repo.observeReel(saved.reel.id).first()!!
+        assertEquals(false, r.isUnavailable)
+        assertEquals("keep me", r.note)
+    }
 }

@@ -235,7 +235,9 @@ class ReelRepository(
     suspend fun setNote(reelId: Long, note: String) = mutate(reelId) { it.copy(note = note.take(NOTE_LIMIT)) }
     suspend fun setTitle(reelId: Long, title: String) = mutate(reelId) { it.copy(title = title.trim().ifEmpty { it.title }) }
     suspend fun markOpened(reelId: Long) = mutate(reelId) { it.copy(lastOpenedAt = now()) }
-    suspend fun markUnavailable(reelId: Long) = mutate(reelId) { it.copy(isUnavailable = true) }
+    suspend fun markUnavailable(reelId: Long) = setUnavailable(reelId, true)
+    /** Instagram/Facebook said the post can't be shown (private or removed). Notes and tags are kept; reversible. */
+    suspend fun setUnavailable(reelId: Long, value: Boolean) = mutate(reelId) { if (it.isUnavailable == value) it else it.copy(isUnavailable = value) }
     /** @return the deleted reel's thumbnail url so the caller can remove the stored image. */
     suspend fun delete(reelId: Long): String? = reels.get(reelId)?.let { reels.delete(it); it.thumbnailUrl }
 
