@@ -34,6 +34,12 @@ Screens are rendered to `app/build/screenshots/*.png` by `ScreenshotTest` (no de
 Reminders and weekly digest, accounts and Supabase sync, export / delete-my-data, settings, custom and
 sub-folders, collections, affiliate "Act on this" cards (planned for month 3), Facebook/Instagram dedupe merge.
 
+## Experimental captioned embed import (debug APK)
+
+Debug builds now attempt a plain HTTPS GET of the public Instagram `/embed/captioned/` document and parse `contextJSON` (with visible HTML fallback). No cookie, browser automation, screenshot, or new backend is needed. Captions and creator go to the existing organiser; raw HTML never leaves the device. Counts are saved as snapshots. Facebook remains on oEmbed. Denials are respected; no login or anti-bot bypass.
+
+Release builds disable this experimental provider pending confirmation of Meta permissions for automated collection and storage. The following sections describe the existing oEmbed/manual fallback path. Run `./gradlew :app:testDebugUnitTest :app:assembleDebug` and test multiple public URLs before relying on the debug provider.
+
 ## Getting details for a reel (creator, caption, tags)
 
 Meta's public (tokenless) oEmbed returns the embed HTML, which the app renders (see "Meta oEmbed" below), but not
