@@ -42,8 +42,8 @@ private sealed interface EmbedState {
 }
 
 /**
- * Shows the post as Instagram/Facebook display it (creator, caption, thumbnail). Nothing is requested until the
- * user taps. Order: Meta's official oEmbed markup in a locked-down WebView, then the basic embed page as a
+ * Shows the post as Instagram/Facebook display it (creator, caption, thumbnail) when its detail page opens.
+ * Order: Meta's official oEmbed markup in a locked-down WebView, then the basic embed page as a
  * fallback. Private, removed, rate-limited and offline cases each get their own message.
  */
 @Composable
@@ -60,7 +60,7 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
             when (val decision = decideEmbed(platform, oEmbed.fetch(platform, permalink))) {
                 is EmbedDecision.Show -> { state = EmbedState.Official(decision.page); onAvailability(true) }
                 is EmbedDecision.Fallback -> { state = EmbedState.Basic(decision.note) }
-                EmbedDecision.Unavailable -> { state = EmbedState.Unavailable; onAvailability(false) }
+                EmbedDecision.Unavailable -> { state = EmbedState.Unavailable }
                 EmbedDecision.Offline -> state = EmbedState.Offline
             }
         }
@@ -86,12 +86,13 @@ fun EmbedView(platform: Platform, permalink: String, onAvailability: (Boolean) -
                 Link("Hide post") { state = EmbedState.Idle }
             }
             EmbedState.Unavailable -> {
-                Text("${platform.label} says this post isn't available. It may be private or removed. Your caption, notes and tags stay saved.", fontSize = 13.sp, lineHeight = 19.sp)
+                Text("${platform.label} could not provide an official preview. The post may be private, removed or not embeddable. Your caption, notes and tags stay saved.", fontSize = 13.sp, lineHeight = 19.sp)
                 Link("Try the basic view anyway") { state = EmbedState.Basic(null) }
                 Link("Open in ${platform.label}") { openOriginal() }
             }
             EmbedState.Offline -> {
                 Hint("Couldn't reach ${platform.label}. Check your connection.")
+                Link("Try the basic view") { state = EmbedState.Basic(null) }
                 Link("Try again") { load() }
             }
         }
