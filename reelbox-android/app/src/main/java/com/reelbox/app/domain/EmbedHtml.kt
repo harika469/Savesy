@@ -44,9 +44,9 @@ object EmbedHtml {
     fun baseUrl(platform: Platform) = if (platform == Platform.INSTAGRAM) "https://www.instagram.com/" else "https://www.facebook.com/"
 
     fun page(platform: Platform, safeHtml: String): String {
-        val script = if (platform == Platform.INSTAGRAM) "https://www.instagram.com/embed.js"
+        val script = if (platform == Platform.INSTAGRAM) "https://platform.instagram.com/en_US/embeds.js"
         else "https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v27.0"
-        val csp = "default-src 'none'; script-src https://www.instagram.com https://connect.facebook.net; " +
+        val csp = "default-src 'none'; script-src https://www.instagram.com https://platform.instagram.com https://connect.facebook.net; " +
             "frame-src https://*.instagram.com https://instagram.com https://*.facebook.com; " +
             "img-src https: data:; media-src https:; font-src https: data:; style-src 'unsafe-inline' https:; " +
             "connect-src https://*.instagram.com https://*.facebook.com https://*.cdninstagram.com; base-uri 'none'; form-action 'none'"
