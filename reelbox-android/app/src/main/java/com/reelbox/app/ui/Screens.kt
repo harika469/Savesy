@@ -68,7 +68,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             when (val result = repo.capture(text)) {
                 CaptureResult.Invalid -> message.value = "That doesn't look like an Instagram or Facebook reel link"
-                is CaptureResult.Duplicate -> message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
+                is CaptureResult.Duplicate -> {
+                    onSaved(result.reel.id)
+                    if (result.reel.caption.isBlank() || result.reel.enrichState == com.reelbox.app.data.EnrichState.PENDING) {
+                        getApplication<ReelboxApp>().importReel(result.reel.id).await()
+                    } else message.value = "Already saved in ${result.folder?.name ?: "Inbox"}"
+                }
                 is CaptureResult.Saved -> {
                     onSaved(result.reel.id)
                     (getApplication<ReelboxApp>()).importReel(result.reel.id).await()
