@@ -67,4 +67,32 @@ class CaptionedEmbedProviderTest {
             assertEquals(EnrichResult.Offline, provider.enrich(link))
         }
     }
+
+    /** Regression: the real embed page holds a contextJSON string of hundreds of KB. A per-character regex overflowed the stack on it. */
+    @Test fun parsesAHugeContextStringWithoutOverflowingTheStack() {
+        val padding = "x\\y \"z\" ".repeat(60_000)           // ~600 KB of escaped characters inside the string
+        val big = JSONObject(inner.toString()).apply {
+            getJSONObject("gql_data").getJSONObject("shortcode_media").put("padding", padding)
+        }
+        val page = "<html><head>" + "<script>var a=\"contextJSON\";</script>".repeat(3) +
+            "<script>{\"contextJSON\":" + JSONObject.quote(big.toString()) + "}</script></head></html>"
+        assertTrue(page.length > 700_000)
+        val data = CaptionedEmbedParser.parse(page, id)!!
+        assertEquals("@purna_recipes", data.creatorHandle)
+        assertEquals(caption, data.caption)
+    }
+
+    @Test fun contextScanIgnoresKeysWithoutAStringValue() {
+        val page = """{"contextJSON": 5} {"contextJSON" "no-colon"} {"contextJSON":"ok"} {"contextJSON":"unterminated"""
+        assertEquals(listOf("\"ok\""), CaptionedEmbedParser.contextStrings(page).toList())
+    }
+
+    @Test fun anUnreadablePageNeverCrashesTheImport() = runBlocking {
+        MockWebServer().use { server ->
+            server.start()
+            val provider = CaptionedEmbedProvider(fallback = ManualProvider, baseUrl = server.url("/"))
+            server.enqueue(MockResponse().setBody("<html>" + "\u0000\"contextJSON\":\"" + "\\".repeat(50_001)))
+            assertTrue(provider.enrich(link) is EnrichResult.DisplayOnly)
+        }
+    }
 }

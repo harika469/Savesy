@@ -13,7 +13,32 @@ import java.io.IOException
 
 /** Uses the supplied public embed document, not its scripts or private API endpoints. */
 object CaptionedEmbedParser {
-    private val contextPattern = Regex(""""contextJSON"\s*:\s*("(?:\\.|[^"\\])*")""")
+    private const val CONTEXT_KEY = "\"contextJSON\""
+
+    /**
+     * Finds every `"contextJSON": "<json string>"` in the page and returns the quoted string. This is a linear scan
+     * on purpose: a regex such as `"(?:\\.|[^"\\])*"` recurses once per character in Java and overflows the stack
+     * on the real page, whose contextJSON string is hundreds of kilobytes.
+     */
+    internal fun contextStrings(html: String): Sequence<String> = sequence {
+        var from = 0
+        while (true) {
+            val key = html.indexOf(CONTEXT_KEY, from)
+            if (key < 0) break
+            var i = key + CONTEXT_KEY.length
+            while (i < html.length && html[i].isWhitespace()) i++
+            if (i >= html.length || html[i] != ':') { from = key + CONTEXT_KEY.length; continue }
+            i++
+            while (i < html.length && html[i].isWhitespace()) i++
+            if (i >= html.length || html[i] != '"') { from = key + CONTEXT_KEY.length; continue }
+            val start = i
+            i++
+            while (i < html.length && html[i] != '"') i += if (html[i] == '\\') 2 else 1
+            if (i >= html.length) break
+            yield(html.substring(start, i + 1))
+            from = i + 1
+        }
+    }
 
     private fun JSONObject.string(key: String): String? =
         if (isNull(key)) null else optString(key).trim().takeIf { it.isNotEmpty() }
@@ -25,10 +50,10 @@ object CaptionedEmbedParser {
         value?.takeIf { EmbedPolicy.isAllowed(it) }
 
     fun parse(html: String, expectedId: String): Enrichment? {
-        val media = contextPattern.findAll(html).mapNotNull { match ->
+        val media = contextStrings(html).mapNotNull { quoted ->
             runCatching {
                 // Decode the outer JSON string, then parse the inner object.
-                val wrapper = JSONObject("{\"value\":" + match.groupValues[1] + "}")
+                val wrapper = JSONObject("{\"value\":" + quoted + "}")
                 JSONObject(wrapper.getString("value"))
                     .optJSONObject("gql_data")?.optJSONObject("shortcode_media")
             }.getOrNull()
@@ -106,6 +131,10 @@ class CaptionedEmbedProvider(
             }
         } catch (_: IOException) {
             EnrichResult.Offline
+        } catch (_: Exception) {
+            EnrichResult.DisplayOnly // a page we cannot read must never crash the import
+        } catch (_: StackOverflowError) {
+            EnrichResult.DisplayOnly
         }
     }
 
