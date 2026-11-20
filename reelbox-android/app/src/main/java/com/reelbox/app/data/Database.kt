@@ -10,6 +10,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -54,13 +56,21 @@ interface FolderDao {
     suspend fun findByName(name: String): FolderEntity?
 }
 
-@Database(entities = [ReelEntity::class, FolderEntity::class], version = 1, exportSchema = false)
+/** v2: adds the cached AI result to every reel. Existing reels keep all their data. */
+val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE reels ADD COLUMN aiJson TEXT")
+        db.execSQL("ALTER TABLE reels ADD COLUMN aiHash TEXT")
+    }
+}
+
+@Database(entities = [ReelEntity::class, FolderEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun reels(): ReelDao
     abstract fun folders(): FolderDao
 
     companion object {
         fun create(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, "reelbox.db").build()
+            Room.databaseBuilder(context, AppDatabase::class.java, "reelbox.db").addMigrations(MIGRATION_1_2).build()
     }
 }

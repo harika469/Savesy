@@ -114,6 +114,7 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
     val context = LocalContext.current
     val item by remember(id) { vm.observe(id) }.collectAsStateWithLifecycle(initialValue = null)
     val folders by vm.folders.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.messages.collect { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } }
     val current = item ?: return
     Scaffold { padding ->
         androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
@@ -131,8 +132,9 @@ private fun DetailRoute(id: Long, onBack: () -> Unit, vm: DetailViewModel = view
                 onNote = { vm.note(id, it) },
                 onTitle = { vm.title(id, it) },
                 onDescribe = { vm.describe(id, it) },
-                onScreenshot = { uris -> vm.screenshot(id, uris) { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } },
-                onPasteCaption = { text -> vm.pasteCaption(id, text) { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show() } },
+                onScreenshot = { uris -> vm.screenshot(id, uris) },
+                onPasteCaption = { text -> vm.pasteCaption(id, text) },
+                onOrganise = { vm.organise(id) },
                 onDelete = { vm.delete(id); onBack() },
             )
         }

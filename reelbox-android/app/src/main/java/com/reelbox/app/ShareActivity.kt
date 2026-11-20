@@ -20,6 +20,7 @@ import com.reelbox.app.data.CaptureResult
 import com.reelbox.app.data.EnrichState
 import com.reelbox.app.data.ReelRepository
 import com.reelbox.app.data.ScreenshotImporter
+import com.reelbox.app.data.userMessage
 import com.reelbox.app.ui.CaptureSheet
 import com.reelbox.app.ui.CaptureUi
 import com.reelbox.app.ui.ReelboxTheme
@@ -59,6 +60,7 @@ class ShareActivity : ComponentActivity() {
                                     repo.describe(id, said)?.let { outcome ->
                                         ui.value = CaptureUi.Saved(outcome.folder, outcome.suggestion?.confidence, pending = false, manual = false, described = true)
                                     }
+                                    organiseQuietly(id)
                                 }
                             }
                         },
@@ -67,6 +69,7 @@ class ShareActivity : ComponentActivity() {
                                 lifecycleScope.launch {
                                     android.widget.Toast.makeText(this@ShareActivity, importer.import(id, uris), android.widget.Toast.LENGTH_SHORT).show()
                                     refresh(id)
+                                    organiseQuietly(id)
                                 }
                             }
                         },
@@ -99,6 +102,13 @@ class ShareActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Runs the AI step after new text arrives and refreshes the card. Silent when there is nothing to report. */
+    private suspend fun organiseQuietly(id: Long) {
+        val outcome = repo.organiseWithAi(id)
+        outcome.userMessage()?.let { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_SHORT).show() }
+        refresh(id)
     }
 
     private suspend fun refresh(id: Long) {

@@ -25,12 +25,12 @@ sealed interface EnrichResult {
     data object Offline : EnrichResult
 }
 
-interface ReelEnricher {
+interface MetadataProvider {
     suspend fun enrich(link: ParsedLink): EnrichResult
 }
 
 /** Used when Supabase isn't configured: every reel is saved for manual details. */
-object NoEnricher : ReelEnricher {
+object ManualProvider : MetadataProvider {
     override suspend fun enrich(link: ParsedLink): EnrichResult = EnrichResult.Unavailable
 }
 
@@ -56,16 +56,38 @@ suspend fun httpGet(url: String): HttpResult = withContext(Dispatchers.IO) {
     }
 }
 
+suspend fun httpPost(url: String, headers: Map<String, String>, body: String): HttpResult = withContext(Dispatchers.IO) {
+    try {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 8000
+            readTimeout = 30000
+            headers.forEach { (k, v) -> setRequestProperty(k, v) }
+        }
+        try {
+            connection.outputStream.use { it.write(body.toByteArray()) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            HttpResult(code, stream?.bufferedReader()?.use { it.readText() }.orEmpty())
+        } finally {
+            connection.disconnect()
+        }
+    } catch (_: IOException) {
+        HttpResult(0, "")
+    }
+}
+
 /**
  * Meta's oEmbed endpoints, called straight from the phone. Since June 2026 they work without an access
  * token, but a tested call (Nov 2026) returned ONLY an embed placeholder, with no title, author or
  * thumbnail, so this is currently not used by the app (see ReelboxApp). Kept for when a Meta token with
  * oEmbed Read access is available, which does return those fields.
  */
-class MetaOEmbedEnricher(
+class MetaOEmbedProvider(
     private val apiVersion: String = "v26.0",
     private val fetch: suspend (String) -> HttpResult = ::httpGet,
-) : ReelEnricher {
+) : MetadataProvider {
     override suspend fun enrich(link: ParsedLink): EnrichResult {
         val endpoint = if (link.platform == Platform.INSTAGRAM) "instagram_oembed" else "oembed_video"
         val url = "https://graph.facebook.com/$apiVersion/$endpoint?url=" + URLEncoder.encode(link.permalink, "UTF-8") + "&omitscript=true"

@@ -9,6 +9,9 @@ import com.reelbox.app.data.FolderEntity
 import com.reelbox.app.data.ReelRepository
 import com.reelbox.app.data.ReelStatus
 import com.reelbox.app.data.ScreenshotImporter
+import com.reelbox.app.data.userMessage
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import com.reelbox.app.data.ThumbStore
 import com.reelbox.app.data.ReelWithFolder
 import com.reelbox.app.domain.ReelSearch
@@ -78,24 +81,49 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 class DetailViewModel(app: Application) : AndroidViewModel(app) {
     private val repo: ReelRepository = (app as ReelboxApp).repository
     val folders: StateFlow<List<FolderEntity>> = repo.observeFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val thumbs = ThumbStore(app)
+    private val importer = ScreenshotImporter(app, repo, thumbs)
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: SharedFlow<String> = _messages
 
     fun observe(id: Long) = combine(repo.observeReel(id), folders) { reel, f -> reel?.let { ReelWithFolder(it, f.firstOrNull { x -> x.id == it.folderId }) } }
     fun status(id: Long, status: ReelStatus) = viewModelScope.launch { repo.setStatus(id, status) }
     fun move(id: Long, folderId: Long) = viewModelScope.launch { repo.moveToFolder(id, folderId) }
     fun note(id: Long, note: String) = viewModelScope.launch { repo.setNote(id, note) }
-    fun describe(id: Long, said: String) = viewModelScope.launch { repo.describe(id, said) }
     fun title(id: Long, title: String) = viewModelScope.launch { repo.setTitle(id, title) }
     fun opened(id: Long) = viewModelScope.launch { repo.markOpened(id) }
-    private val thumbs = ThumbStore(app)
-    private val importer = ScreenshotImporter(app, repo, thumbs)
-    fun screenshot(id: Long, uris: List<android.net.Uri>, onMessage: (String) -> Unit) {
-        viewModelScope.launch { onMessage("Reading screenshot…"); onMessage(importer.import(id, uris)) }
-    }
-    fun pasteCaption(id: Long, text: String, onMessage: (String) -> Unit) {
+    fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
+
+    /** After new text arrives (spoken, pasted, scanned) the AI step runs on its own, once per unchanged text. */
+    private suspend fun autoOrganise(id: Long) { repo.organiseWithAi(id).userMessage()?.let { _messages.emit(it) } }
+
+    fun describe(id: Long, said: String) = viewModelScope.launch { repo.describe(id, said); autoOrganise(id) }
+
+    fun screenshot(id: Long, uris: List<android.net.Uri>) {
         viewModelScope.launch {
-            val out = repo.setCaptionFromText(id, text)
-            onMessage(if (out == null) "Nothing to paste" else "Caption saved (${text.trim().length} characters)")
+            _messages.emit("Reading screenshot…")
+            _messages.emit(importer.import(id, uris))
+            autoOrganise(id)
         }
     }
-    fun delete(id: Long) = viewModelScope.launch { thumbs.delete(repo.delete(id)) }
+
+    fun pasteCaption(id: Long, text: String) {
+        viewModelScope.launch {
+            val out = repo.setCaptionFromText(id, text)
+            _messages.emit(if (out == null) "Nothing to paste" else "Caption saved (${text.trim().length} characters)")
+            autoOrganise(id)
+        }
+    }
+
+    /** The button: runs the AI step now and says what happened, including when nothing was sent. */
+    fun organise(id: Long) {
+        viewModelScope.launch {
+            _messages.emit(when (val outcome = repo.organiseWithAi(id)) {
+                is com.reelbox.app.data.OrganiseOutcome.Done -> if (outcome.fromCache) "Already organised: nothing changed" else "Organised with AI"
+                com.reelbox.app.data.OrganiseOutcome.TooLittleText -> "Add a caption, a screenshot or a few words first."
+                com.reelbox.app.data.OrganiseOutcome.NotConfigured -> "AI isn't set up in this build yet."
+                else -> outcome.userMessage() ?: "Couldn't organise this one."
+            })
+        }
+    }
 }

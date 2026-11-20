@@ -2,7 +2,7 @@ package com.reelbox.app
 
 import com.reelbox.app.domain.EnrichResult
 import com.reelbox.app.domain.HttpResult
-import com.reelbox.app.domain.MetaOEmbedEnricher
+import com.reelbox.app.domain.MetaOEmbedProvider
 import com.reelbox.app.domain.UrlParser
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -14,12 +14,12 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-class MetaOEmbedEnricherTest {
+class MetaOEmbedProviderTest {
     private val ig = UrlParser.parse("https://www.instagram.com/reel/Cabc123/?igsh=1")!!
     private val fb = UrlParser.parse("https://www.facebook.com/reel/987654")!!
 
     private fun enricher(result: HttpResult, seen: MutableList<String> = mutableListOf()) =
-        MetaOEmbedEnricher(fetch = { url -> seen += url; result })
+        MetaOEmbedProvider(fetch = { url -> seen += url; result })
 
     @Test fun instagramUsesInstagramEndpointWithoutAnyToken() = runBlocking {
         val seen = mutableListOf<String>()

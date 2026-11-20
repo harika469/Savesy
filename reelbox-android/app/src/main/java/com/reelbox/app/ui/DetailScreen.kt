@@ -45,6 +45,7 @@ fun DetailScreen(
     onDescribe: (String) -> Unit,
     onScreenshot: (List<android.net.Uri>) -> Unit,
     onPasteCaption: (String) -> Unit,
+    onOrganise: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val reel = item.reel
@@ -84,6 +85,8 @@ fun DetailScreen(
             }
 
             EmbedView(reel.platform, reel.permalink)
+
+            AiPanel(reel, onOrganise)
 
             PasteCaptionLink(onPasteCaption)
             ScreenshotPickerLink(onScreenshot)

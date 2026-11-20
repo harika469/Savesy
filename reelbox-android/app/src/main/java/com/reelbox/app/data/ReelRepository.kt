@@ -5,7 +5,11 @@ import com.reelbox.app.domain.Confidence
 import com.reelbox.app.domain.EnrichResult
 import com.reelbox.app.domain.ParsedLink
 import com.reelbox.app.domain.ScreenshotInfo
-import com.reelbox.app.domain.ReelEnricher
+import com.reelbox.app.domain.AiOrganiser
+import com.reelbox.app.domain.AiResult
+import com.reelbox.app.domain.MetadataProvider
+import com.reelbox.app.domain.NoAiOrganiser
+import com.reelbox.app.domain.ReelAi
 import com.reelbox.app.domain.Suggestion
 import com.reelbox.app.domain.UrlParser
 import kotlinx.coroutines.flow.Flow
@@ -19,12 +23,26 @@ sealed interface CaptureResult {
     data object Invalid : CaptureResult
 }
 
+sealed interface OrganiseOutcome {
+    data class Done(val reel: ReelEntity, val fromCache: Boolean) : OrganiseOutcome
+    /** Not enough text to be worth an AI call: the user keeps organising by hand. */
+    data object TooLittleText : OrganiseOutcome
+    data object NotConfigured : OrganiseOutcome
+    data object LimitReached : OrganiseOutcome
+    data object Offline : OrganiseOutcome
+    data class Failed(val reason: String) : OrganiseOutcome
+}
+
+const val MIN_AI_TEXT = 20
+private const val MAX_AI_TEXT = 6000
+
 data class EnrichOutcome(val reel: ReelEntity, val folder: FolderEntity?, val suggestion: Suggestion?)
 
 class ReelRepository(
     private val db: AppDatabase,
-    private val enricher: ReelEnricher,
+    private val enricher: MetadataProvider,
     private val now: () -> Long = System::currentTimeMillis,
+    private val ai: AiOrganiser = NoAiOrganiser,
 ) {
     private val reels get() = db.reels()
     private val folders get() = db.folders()
@@ -164,6 +182,44 @@ class ReelRepository(
         return applyScreenshot(reelId, ScreenshotInfo(null, caption, Classifier.hashtags(caption), null), null)
     }
 
+    /**
+     * AI step: sends only text the user supplied (caption, scanned text, note), never the video or link.
+     * The result is cached on the reel and keyed by a hash of the input, so unchanged text costs nothing.
+     */
+    suspend fun organiseWithAi(reelId: Long, force: Boolean = false): OrganiseOutcome {
+        val reel = reels.get(reelId) ?: return OrganiseOutcome.Failed("Reel not found")
+        val text = listOf(reel.caption, reel.note).filter { it.isNotBlank() }.joinToString("\n\n").take(MAX_AI_TEXT)
+        if (text.length < MIN_AI_TEXT) return OrganiseOutcome.TooLittleText
+        val folderNames = folders.getAll().map { it.name }
+        val hash = sha256("$text|${folderNames.joinToString(",")}")
+        if (!force && reel.aiHash == hash && reel.aiJson != null) return OrganiseOutcome.Done(reel, fromCache = true)
+
+        return when (val result = ai.organise(text, reel.creatorHandle, folderNames)) {
+            AiResult.NotConfigured -> OrganiseOutcome.NotConfigured
+            AiResult.LimitReached -> OrganiseOutcome.LimitReached
+            AiResult.Offline -> OrganiseOutcome.Offline
+            is AiResult.Failed -> OrganiseOutcome.Failed(result.reason)
+            is AiResult.Success -> {
+                val data = result.ai
+                val inbox = folders.findByName(INBOX)
+                val target = folders.findByName(data.category)
+                val folderId = if (inbox != null && reel.folderId == inbox.id && target != null && data.category != INBOX) target.id else reel.folderId
+                // Replace the title only when it is still a placeholder or the automatic one, never one the user typed.
+                val autoTitle = deriveTitle(reel.caption.ifBlank { reel.note })
+                val title = if (data.title.isNotBlank() && (reel.title == "${reel.platform.label} reel" || reel.title == autoTitle)) data.title else reel.title
+                val updated = reel.copy(
+                    title = title,
+                    folderId = folderId,
+                    hashtags = (data.tags + reel.tagList).distinct().take(5).joinToString(","),
+                    aiJson = data.toJson(),
+                    aiHash = hash,
+                )
+                reels.update(updated)
+                OrganiseOutcome.Done(updated, fromCache = false)
+            }
+        }
+    }
+
     suspend fun isSaved(sharedText: String): Boolean {
         val link = UrlParser.parse(sharedText) ?: return false
         return reels.findByKey(link.key) != null
@@ -195,4 +251,19 @@ fun deriveTitle(said: String): String {
     val first = said.trim().split(Regex("[.!?\\n]")).first().trim()
     val short = if (first.length > 60) first.take(60).substringBeforeLast(' ', first.take(60)).trimEnd(',', ' ') + "…" else first
     return short.replaceFirstChar { it.uppercase() }.ifEmpty { "Saved reel" }
+}
+
+private fun sha256(text: String): String =
+    java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+
+/** Parsed AI result for a reel, if one has been generated. */
+val ReelEntity.ai: ReelAi? get() = aiJson?.let(ReelAi::fromJson)
+
+/** Short note to show after an automatic AI run; null when there is nothing worth telling the user. */
+fun OrganiseOutcome.userMessage(): String? = when (this) {
+    is OrganiseOutcome.Done -> if (fromCache) null else "Organised with AI"
+    OrganiseOutcome.LimitReached -> "Today's AI limit is used up. You can still organise by hand."
+    OrganiseOutcome.Offline -> "No connection for AI. Try again later."
+    is OrganiseOutcome.Failed -> "AI couldn't organise this one."
+    OrganiseOutcome.NotConfigured, OrganiseOutcome.TooLittleText -> null
 }

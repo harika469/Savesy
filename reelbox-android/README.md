@@ -52,3 +52,36 @@ Instagram's pages directly would be scraping, which the handover rules out. So t
 
 `MetaOEmbedEnricher` is kept (and tested) for when a Meta token with oEmbed Read access exists, which does return
 author and thumbnail; switch it on in `ReelboxApp.kt`. Facebook reels via `oembed_video` were not tested.
+
+## AI organising (Supabase Edge Function)
+
+After text arrives (pasted caption, scanned screenshot, spoken or typed words) Reelbox can call the `organise`
+function. It returns a title, summary, category, tags, ingredients, places, products, suggested actions and
+cooking time. Only that text and the creator name are sent, never the video, link or account details. The result
+is cached on the reel and keyed by a hash of the text, so unchanged text is never sent again.
+Without Supabase configured the button says "AI isn't set up" and everything else keeps working.
+
+Status: the function, SQL and app code are written and unit-tested (11 Node tests for the function logic, plus
+the app tests), but **not deployed and not run against real Supabase or an AI service yet**.
+
+Setup:
+1. Create a Supabase project (EU region) and install the Supabase CLI.
+2. Dashboard -> Authentication -> Sign In / Providers -> enable **Allow anonymous sign-ins** (each install gets its
+   own anonymous user so usage can be counted). Turning on CAPTCHA protection is recommended.
+3. `supabase link --project-ref <ref>` then `supabase db push` (creates the daily usage counters).
+4. `supabase secrets set ANTHROPIC_API_KEY=... ` (optional: `AI_MODEL`, `DAILY_LIMIT=30`, `GLOBAL_DAILY_LIMIT=3000`,
+   `AI_ENABLED=false` as an off switch), then `supabase functions deploy organise` (leave JWT verification on).
+5. Add `supabase.url` and `supabase.anonKey` to `local.properties` and rebuild the app.
+6. Set a monthly spend limit with the AI provider.
+
+Cost protection: a per-user daily cap and an app-wide daily cap are enforced in Postgres. Anonymous accounts are
+cheap to create, so the app-wide cap and the provider spend limit are the real safety net.
+
+Function tests: `node --experimental-strip-types --test supabase/functions/organise/logic.test.ts`
+
+## Why there is no Meta oEmbed / Graph API
+
+Meta's oEmbed Read needs App Review, which needs a verified business. Tokenless oEmbed returns no creator, caption or
+thumbnail. So the app shows Instagram's own embed page for a reel (loaded on tap) and takes text from the user.
+`MetaOEmbedProvider` stays in the code behind the `MetadataProvider` interface for when a business is registered.
+Providers are interchangeable: add another `MetadataProvider` and pass it to `ReelRepository`.

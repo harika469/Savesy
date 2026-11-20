@@ -12,7 +12,7 @@ import com.reelbox.app.data.ReelStatus
 import com.reelbox.app.domain.EnrichResult
 import com.reelbox.app.domain.Enrichment
 import com.reelbox.app.domain.ParsedLink
-import com.reelbox.app.domain.ReelEnricher
+import com.reelbox.app.domain.MetadataProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -25,7 +25,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-private class FakeEnricher(var result: EnrichResult) : ReelEnricher {
+private class FakeEnricher(var result: EnrichResult) : MetadataProvider {
     override suspend fun enrich(link: ParsedLink) = result
 }
 
