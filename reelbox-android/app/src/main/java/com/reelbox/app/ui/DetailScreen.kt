@@ -76,6 +76,8 @@ fun DetailScreen(
                 }
             }
 
+            EmbedView(reel.platform, reel.permalink)
+
             ScreenshotPickerLink(onScreenshot)
 
             Text("Status", fontWeight = FontWeight.Bold, fontSize = 15.sp)
