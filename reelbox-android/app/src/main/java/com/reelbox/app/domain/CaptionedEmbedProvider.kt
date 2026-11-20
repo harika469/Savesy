@@ -58,7 +58,7 @@ object CaptionedEmbedParser {
         val artist = music?.string("artist_name")
         val track = music?.string("song_name")
         return Enrichment(
-            title = caption?.lineSequence()?.firstOrNull()?.take(120),
+            title = caption?.let { com.reelbox.app.data.deriveTitle(it) },
             caption = caption,
             creatorName = owner?.string("full_name") ?: username,
             creatorHandle = username?.let { "@" + it.removePrefix("@") },
