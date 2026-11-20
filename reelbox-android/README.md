@@ -77,6 +77,10 @@ Setup:
 Cost protection: a per-user daily cap and an app-wide daily cap are enforced in Postgres. Anonymous accounts are
 cheap to create, so the app-wide cap and the provider spend limit are the real safety net.
 
+Dashboard-only setup (no CLI): SQL Editor -> paste `supabase/migrations/20261120000000_ai_usage.sql` and run; Edge Functions -> Secrets ->
+add `ANTHROPIC_API_KEY`; Edge Functions -> Deploy a new function -> Via Editor -> name `organise`, paste
+`supabase/functions/organise/index.single.ts`, and turn off "Verify JWT".
+
 Function tests: `node --experimental-strip-types --test supabase/functions/organise/logic.test.ts`
 
 ## Meta oEmbed (current rules, checked Nov 2026)
