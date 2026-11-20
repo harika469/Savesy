@@ -18,6 +18,8 @@ sealed interface EnrichResult {
     data class Success(val data: Enrichment) : EnrichResult
     /** Private, deleted or blocked reel. Don't retry; the user adds details by hand. */
     data object Unavailable : EnrichResult
+    /** Public embed exists, but Meta did not return structured metadata. */
+    data object DisplayOnly : EnrichResult
     /** No network or the service is down. Keep as pending and retry later. */
     data object Offline : EnrichResult
 }
@@ -66,7 +68,7 @@ class MetaOEmbedProvider(private val client: OEmbedClient = OEmbedClient()) : Me
         is OEmbedResult.Success -> {
             val author = result.authorName
             val caption = result.title
-            if (author == null && caption == null && result.thumbnailUrl == null) EnrichResult.Unavailable
+            if (author == null && caption == null && result.thumbnailUrl == null) EnrichResult.DisplayOnly
             else EnrichResult.Success(
                 Enrichment(
                     title = caption?.lineSequence()?.firstOrNull()?.take(120),
